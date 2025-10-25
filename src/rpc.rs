@@ -139,7 +139,7 @@ pub struct RpcServer {
 /// - If found, it awaits the handler’s async execution and wraps the output into a `RpcResponse`.
 /// - On success, returns a response with the handler’s result.
 /// - On failure
-impl RpcSever {
+impl RpcServer {
     pub fn new() -> Self {
         Self {
             handlers: RwLock::new(HashMap::new()),
