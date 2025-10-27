@@ -10,7 +10,7 @@ async fn test_ping() {
     // spawn server in background
     let addr = "127.0.0.1:5001";
     task::spawn(async move {
-        dice_rpc::server::run(addr).await.unwrap();
+        dice_rpc::server::server::run(addr).await.unwrap();
     });
 
     // small sleep to let server bind

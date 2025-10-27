@@ -3,8 +3,6 @@ name = "dice_rpc"
 version = "0.1.0"
 edition = "2024"
 
-[[bin]]
-name = "dice_rpc" 
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -14,6 +12,27 @@ clap = { version = "4.2", features = ["derive"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 anyhow = "1.0"
 
+# HTTP transport
+axum = { version = "0.7", optional = true }
+tower = { version = "0.4", optional = true }
+tower-http = { version = "0.5", features = ["trace"], optional = true }
+
+# Logging and tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Async utilities
+futures = "0.3"
+reqwest = { version = "0.12.24", features = ["json"] }
+
+
+
 [dev-dependencies]
 tokio-test = "0.4"
 
+
+[features]
+default = ["tcp", "http"]
+tcp = []
+http = ["dep:axum", "dep:tower", "dep:tower-http"]
+full = ["tcp", "http"]
