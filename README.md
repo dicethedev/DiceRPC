@@ -479,7 +479,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
-Built with ❤️ using Rust and the amazing ecosystem:
+Built with Rust and the amazing ecosystem:
 - [Tokio](https://tokio.rs/) — Async runtime
 - [Serde](https://serde.rs/) — Serialization
 - [Axum](https://github.com/tokio-rs/axum) — HTTP framework
@@ -491,6 +491,6 @@ Built with ❤️ using Rust and the amazing ecosystem:
 
 **⭐ Star this repo if you find it useful!**
 
-Made by [dicethedev] | [GitHub](https://github.com/dicethedev) | [Twitter](https://twitter.com/dicethedev)
+Made by dicethedev | [GitHub](https://github.com/dicethedev) | [Twitter](https://twitter.com/dicethedev)
 
 </div>
