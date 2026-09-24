@@ -280,70 +280,15 @@ When fixing a bug, add a regression test that fails without the fix. When adding
 
 ## Contributing
 
-Contributions are welcome—documentation fixes and focused beginner changes are just as valuable as large features.
+Contributions are welcome—documentation fixes and focused beginner changes are just as valuable as large features. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, quality checks, commit guidance, pull-request expectations, and licensing terms.
 
-1. Search the existing [issues](https://github.com/dicethedev/DiceRPC/issues) before starting.
-2. For a large feature, security-sensitive change, or breaking API change, open an issue first to discuss the approach.
-3. Fork the repository and create a focused branch from `main`.
-4. Make the change and add or update tests.
-5. Run the checks in [Testing and quality checks](#testing-and-quality-checks).
-6. Open a pull request explaining the problem, your approach, test coverage, and any compatibility or security impact.
-
-Helpful pull requests are:
-
-- focused on one problem;
-- clear about behavior changes and tradeoffs;
-- covered by tests where practical;
-- formatted with `cargo fmt`;
-- free of unrelated refactors; and
-- documented when they change a public API or command.
-
-For a useful bug report, include reproduction steps, expected and actual behavior, your Rust version, operating system, and sanitized logs. Never include API keys, private transactions, or other secrets.
-
-### Good areas to contribute
-
-- JSON-RPC 2.0 compliance and interoperability tests
-- Authentication and authorization design
-- Request, connection, batch, and timeout limits
-- TLS guidance and reverse-proxy examples
-- Error handling and typed parameters
-- WebSocket transport
-- Persistent storage adapters
-- Benchmarks and load testing
-- API documentation and beginner examples
+For significant features, security-sensitive work, or breaking API changes, please open an issue before implementation so the approach can be discussed.
 
 ## Security
 
-DiceRPC has not received an independent security audit. The current release should be treated as experimental software, not a hardened public RPC gateway.
+DiceRPC is experimental and has not received an independent security audit. Read [SECURITY.md](SECURITY.md) for supported versions, known limitations, safer deployment guidance, and private vulnerability-reporting instructions.
 
-### Known security limitations
-
-- Built-in transports do not provide TLS. The examples send traffic in plaintext.
-- `ApiKeyInParams` places a credential inside the JSON body, where application logs and tracing systems may capture it.
-- `ApiKeyInHeader` is currently a placeholder and does not validate an HTTP header.
-- The framed TCP authentication path currently does not enforce the configured `AuthMiddleware`. Do not rely on the `--auth` option or TCP authentication examples for access control.
-- Development keys shown by the CLI and examples are public and must never be used as real secrets.
-- The framework does not yet impose production-grade request-body, frame, batch, connection, concurrency, or execution-time limits.
-- The included state store is in-memory demonstration code and does not provide durable or distributed consistency.
-
-### Safer deployment guidance
-
-- Bind to `127.0.0.1` unless remote access is explicitly required.
-- Put the service behind a trusted TLS reverse proxy or API gateway.
-- Enforce authentication and per-method authorization at that gateway until DiceRPC's built-in paths are hardened and tested.
-- Generate strong credentials, store them outside source control, rotate them, and redact them from logs.
-- Validate the shape, type, range, and maximum size of every method parameter.
-- Configure body-size, frame-size, batch-size, connection, concurrency, and timeout limits.
-- Restrict `/metrics` because operational data may reveal sensitive service details.
-- Run with minimal operating-system and network privileges.
-- Pin reviewed dependency versions and monitor Rust dependency advisories.
-- Add abuse, fuzz, and load tests appropriate to your deployment before exposing it publicly.
-
-### Report a vulnerability
-
-Please report suspected vulnerabilities privately through [GitHub Security Advisories](https://github.com/dicethedev/DiceRPC/security/advisories/new), not a public issue.
-
-Include the affected version or commit, impact, reproduction steps or a proof of concept, and any suggested mitigation. Remove real credentials and user data from the report. Please allow time for investigation and a coordinated fix before publicly disclosing the issue.
+Please report suspected vulnerabilities through [GitHub Security Advisories](https://github.com/dicethedev/DiceRPC/security/advisories/new), not a public issue.
 
 ## Roadmap
 
@@ -364,7 +309,12 @@ Have another idea? Open an issue and describe the problem it solves.
 
 ## License
 
-This repository does not currently include a license file. Until one is added, standard copyright restrictions apply. Please open an issue before relying on a particular license or contributing substantial code that depends on one.
+DiceRPC is dual-licensed under your choice of:
+
+- the [MIT License](LICENSE-MIT); or
+- the [Apache License, Version 2.0](LICENSE-APACHE).
+
+You may use, modify, and distribute the project under either license. See the license files for the complete terms.
 
 ## Resources
 
