@@ -1,9 +1,9 @@
+use dice_rpc::client::ClientArgs;
 use std::time::Duration;
-use tokio::time::sleep;
-use dice_rpc::client::ClientArgs; 
-use tokio::task;
-use tokio::io::AsyncWriteExt;
 use tokio::io::AsyncBufReadExt;
+use tokio::io::AsyncWriteExt;
+use tokio::task;
+use tokio::time::sleep;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_ping() {

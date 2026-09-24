@@ -1,8 +1,8 @@
 /// Full-featured HTTP server with all features
-/// 
+///
 /// Run with:
 /// cargo run --example http_full_featured --features http
-
+use anyhow::{Context, ensure};
 use dice_rpc::*;
 use std::sync::Arc;
 use std::time::Duration;
@@ -36,20 +36,16 @@ async fn main() -> anyhow::Result<()> {
 
     // Setup authentication
     let auth = Arc::new(middleware::AuthMiddleware::new(
-        middleware::AuthStrategy::ApiKeyInParams
+        middleware::AuthStrategy::ApiKeyInParams,
     ));
-    
-    // Load keys from environment or use defaults
-    if let Ok(keys) = std::env::var("API_KEYS") {
-        for key in keys.split(',') {
-            auth.add_key(key.trim()).await;
-        }
-        println!("Loaded API keys from environment");
-    } else {
-        auth.add_key("dev-secret-key").await;
-        auth.add_key("prod-secret-key").await;
-        println!("Using default API keys: dev-secret-key, prod-secret-key");
+
+    let keys = std::env::var("API_KEYS").context("set API_KEYS before starting the example")?;
+    let mut key_count = 0usize;
+    for key in keys.split(',').map(str::trim).filter(|key| !key.is_empty()) {
+        key_count += usize::from(auth.add_key(key).await);
     }
+    ensure!(key_count > 0, "API_KEYS must contain a non-empty key");
+    println!("Loaded {key_count} API key(s) from the environment");
     println!();
 
     // Spawn metrics reporter
@@ -79,8 +75,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let addr = std::env::var("HTTP_ADDR")
-        .unwrap_or_else(|_| "127.0.0.1:3000".to_string());
+    let addr = std::env::var("HTTP_ADDR").unwrap_or_else(|_| "127.0.0.1:3000".to_string());
 
     server::metrics::log_startup(&addr, "HTTP");
     println!();
@@ -105,12 +100,16 @@ async fn main() -> anyhow::Result<()> {
     println!("Single request:");
     println!(r#"curl -X POST http://{}/rpc \"#, addr);
     println!(r#"  -H "Content-Type: application/json" \"#);
-    println!(r#"  -d '{{"jsonrpc":"2.0","method":"ping","params":{{"api_key":"dev-secret-key"}},"id":1}}'"#);
+    println!(
+        r#"  -d '{{"jsonrpc":"2.0","method":"ping","params":{{"api_key":"<API_KEY>"}},"id":1}}'"#
+    );
     println!();
     println!("Batch request:");
     println!(r#"curl -X POST http://{}/rpc \"#, addr);
     println!(r#"  -H "Content-Type: application/json" \"#);
-    println!(r#"  -d '[{{"jsonrpc":"2.0","method":"ping","params":{{"api_key":"dev-secret-key"}},"id":1}},{{"jsonrpc":"2.0","method":"list_accounts","params":{{"api_key":"dev-secret-key"}},"id":2}}]'"#);
+    println!(
+        r#"  -d '[{{"jsonrpc":"2.0","method":"ping","params":{{"api_key":"<API_KEY>"}},"id":1}},{{"jsonrpc":"2.0","method":"list_accounts","params":{{"api_key":"<API_KEY>"}},"id":2}}]'"#
+    );
     println!();
     println!("Press Ctrl+C for graceful shutdown");
     println!();
@@ -122,6 +121,6 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     server::metrics::log_shutdown();
-    
+
     Ok(())
 }

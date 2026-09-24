@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use tracing::{info, warn, debug};
+use tracing::{debug, info, warn};
 
 #[allow(dead_code)]
 /// Metrics collector for RPC server
@@ -51,7 +51,7 @@ impl Metrics {
     pub async fn record_duration(&self, duration: Duration) {
         let mut avg = self.avg_duration_us.write().await;
         let new_duration = duration.as_micros() as u64;
-        
+
         // Simple moving average
         *avg = if *avg == 0 {
             new_duration
@@ -118,7 +118,7 @@ impl RequestTracer {
         let method = method.into();
         debug!("Starting request: {}", method);
         metrics.record_request();
-        
+
         Self {
             method,
             start: Instant::now(),
@@ -134,7 +134,7 @@ impl RequestTracer {
             self.method,
             duration.as_millis()
         );
-        
+
         self.metrics.record_success();
         self.metrics.record_duration(duration).await;
         self.metrics.record_method(&self.method).await;
@@ -149,7 +149,7 @@ impl RequestTracer {
             error,
             duration.as_millis()
         );
-        
+
         self.metrics.record_error();
         self.metrics.record_duration(duration).await;
         self.metrics.record_method(&self.method).await;

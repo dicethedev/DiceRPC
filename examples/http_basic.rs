@@ -1,8 +1,7 @@
 /// Basic HTTP RPC server example
-/// 
+///
 /// Run with:
 /// cargo run --example http_basic --features http
-
 use dice_rpc::*;
 use std::sync::Arc;
 
@@ -15,7 +14,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Create server
     let server = Arc::new(RpcServer::new());
-    
+
     // Register default handlers
     rpc::register_default_handlers(&server).await;
 
@@ -29,9 +28,7 @@ async fn main() -> anyhow::Result<()> {
     println!();
 
     // Run server (no auth)
-    transport::HttpTransport::new(server)
-        .serve(addr)
-        .await?;
+    transport::HttpTransport::new(server).serve(addr).await?;
 
     Ok(())
 }

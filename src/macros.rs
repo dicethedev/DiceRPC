@@ -1,16 +1,15 @@
 /// Macros for ergonomic RPC method registration
-/// 
+///
 /// Usage:
 /// ```rust
+/// use dice_rpc::{OptionExt, rpc_handler};
+/// use serde_json::json;
+///
 /// rpc_handler!(my_method, params => {
 ///     let value = params["key"].as_str().ok_or_invalid_params()?;
 ///     Ok(json!({"result": value}))
 /// });
-/// 
-/// server.register_handler("my_method", my_method).await;
 /// ```
-/// 
-
 #[macro_export]
 macro_rules! rpc_handler {
     ($name:ident, $params:ident => $body:block) => {
@@ -18,8 +17,9 @@ macro_rules! rpc_handler {
             $params: serde_json::Value,
         ) -> std::pin::Pin<
             Box<
-                dyn std::future::Future<Output = Result<serde_json::Value, $crate::rpc::RpcErrorObj>>
-                    + Send,
+                dyn std::future::Future<
+                        Output = Result<serde_json::Value, $crate::rpc::RpcErrorObj>,
+                    > + Send,
             >,
         > {
             Box::pin(async move { $body })
@@ -28,14 +28,30 @@ macro_rules! rpc_handler {
 }
 
 /// Macro to register multiple handlers at once
-/// 
+///
 /// Usage:
 /// ```rust
+/// use dice_rpc::{RpcErrorObj, RpcServer, register_handlers};
+/// use serde_json::{Value, json};
+///
+/// async fn ping_handler(_: Value) -> Result<Value, RpcErrorObj> {
+///     Ok(json!("pong"))
+/// }
+/// async fn get_balance_handler(_: Value) -> Result<Value, RpcErrorObj> {
+///     Ok(json!(0))
+/// }
+/// async fn send_tx_handler(_: Value) -> Result<Value, RpcErrorObj> {
+///     Ok(json!("tx-id"))
+/// }
+///
+/// # async fn example() {
+/// let server = RpcServer::new();
 /// register_handlers!(server, {
 ///     "ping" => ping_handler,
 ///     "get_balance" => get_balance_handler,
 ///     "send_tx" => send_tx_handler,
 /// });
+/// # }
 /// ```
 #[macro_export]
 macro_rules! register_handlers {
@@ -52,7 +68,11 @@ macro_rules! register_handlers {
 #[allow(dead_code)]
 pub trait OptionExt<T> {
     fn ok_or_invalid_params(self) -> Result<T, crate::rpc::RpcErrorObj>;
-    fn ok_or_rpc_error(self, code: i64, msg: impl Into<String>) -> Result<T, crate::rpc::RpcErrorObj>;
+    fn ok_or_rpc_error(
+        self,
+        code: i64,
+        msg: impl Into<String>,
+    ) -> Result<T, crate::rpc::RpcErrorObj>;
 }
 
 impl<T> OptionExt<T> for Option<T> {
@@ -64,7 +84,11 @@ impl<T> OptionExt<T> for Option<T> {
         })
     }
 
-    fn ok_or_rpc_error(self, code: i64, msg: impl Into<String>) -> Result<T, crate::rpc::RpcErrorObj> {
+    fn ok_or_rpc_error(
+        self,
+        code: i64,
+        msg: impl Into<String>,
+    ) -> Result<T, crate::rpc::RpcErrorObj> {
         self.ok_or(crate::rpc::RpcErrorObj {
             code,
             message: msg.into(),
@@ -74,24 +98,24 @@ impl<T> OptionExt<T> for Option<T> {
 }
 
 // Example usage in your handlers file:
-// 
+//
 // ```rust
 // use dice_rpc::*;
 // use serde_json::json;
-// 
+//
 // rpc_handler!(ping, _params => {
 //     Ok(json!("pong"))
 // });
-// 
+//
 // rpc_handler!(get_balance, params => {
 //     let address = params["address"]
 //         .as_str()
 //         .ok_or_invalid_params()?;
-//     
+//
 //     let balance = fetch_balance(address).await?;
 //     Ok(json!({"balance": balance}))
 // });
-// 
+//
 // pub async fn setup_handlers(server: &RpcServer) {
 //     register_handlers!(server, {
 //         "ping" => ping,

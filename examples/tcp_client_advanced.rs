@@ -1,8 +1,8 @@
 /// Advanced TCP client with framing support
-/// 
+///
 /// Run with:
 /// cargo run --example tcp_client_advanced --features tcp
-
+use anyhow::Context;
 use dice_rpc::transport::FrameCodec;
 use serde_json::json;
 use tokio::net::TcpStream;
@@ -12,6 +12,7 @@ async fn main() -> anyhow::Result<()> {
     let addr = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "127.0.0.1:4000".to_string());
+    let api_key = std::env::var("API_KEY").context("set API_KEY before running the client")?;
 
     println!("Connecting to {}...", addr);
     let mut stream = TcpStream::connect(&addr).await?;
@@ -23,13 +24,13 @@ async fn main() -> anyhow::Result<()> {
     let ping_req = json!({
         "jsonrpc": "2.0",
         "method": "ping",
-        "params": {"api_key": "dev-secret-key"},
+        "params": {"api_key": api_key.clone()},
         "id": 1
     });
-    
+
     let req_bytes = serde_json::to_vec(&ping_req)?;
     FrameCodec::write_frame(&mut stream, &req_bytes).await?;
-    
+
     let resp_bytes = FrameCodec::read_frame(&mut stream).await?;
     let response: serde_json::Value = serde_json::from_slice(&resp_bytes)?;
     println!("Response: {}", serde_json::to_string_pretty(&response)?);
@@ -42,14 +43,14 @@ async fn main() -> anyhow::Result<()> {
         "method": "get_balance",
         "params": {
             "address": "0xAlice",
-            "api_key": "dev-secret-key"
+            "api_key": api_key.clone()
         },
         "id": 2
     });
-    
+
     let req_bytes = serde_json::to_vec(&balance_req)?;
     FrameCodec::write_frame(&mut stream, &req_bytes).await?;
-    
+
     let resp_bytes = FrameCodec::read_frame(&mut stream).await?;
     let response: serde_json::Value = serde_json::from_slice(&resp_bytes)?;
     println!("Response: {}", serde_json::to_string_pretty(&response)?);
@@ -61,26 +62,26 @@ async fn main() -> anyhow::Result<()> {
         {
             "jsonrpc": "2.0",
             "method": "get_balance",
-            "params": {"address": "0xAlice", "api_key": "dev-secret-key"},
+            "params": {"address": "0xAlice", "api_key": api_key.clone()},
             "id": 3
         },
         {
             "jsonrpc": "2.0",
             "method": "get_balance",
-            "params": {"address": "0xBob", "api_key": "dev-secret-key"},
+            "params": {"address": "0xBob", "api_key": api_key.clone()},
             "id": 4
         },
         {
             "jsonrpc": "2.0",
             "method": "list_accounts",
-            "params": {"api_key": "dev-secret-key"},
+            "params": {"api_key": api_key.clone()},
             "id": 5
         }
     ]);
-    
+
     let req_bytes = serde_json::to_vec(&batch_req)?;
     FrameCodec::write_frame(&mut stream, &req_bytes).await?;
-    
+
     let resp_bytes = FrameCodec::read_frame(&mut stream).await?;
     let response: serde_json::Value = serde_json::from_slice(&resp_bytes)?;
     println!("Response: {}", serde_json::to_string_pretty(&response)?);

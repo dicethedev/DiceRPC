@@ -1,8 +1,7 @@
 /// HTTP server demonstrating batch request support
-/// 
+///
 /// Run with:
 /// cargo run --example http_batch_requests --features http
-
 use dice_rpc::*;
 use std::sync::Arc;
 
@@ -18,7 +17,7 @@ async fn main() -> anyhow::Result<()> {
     // Create server and state
     let server = Arc::new(RpcServer::new());
     let state = Arc::new(state::StateStore::new());
-    
+
     // Setup demo data
     state.set_balance("0xAlice", 10000).await;
     state.set_balance("0xBob", 5000).await;
@@ -36,8 +35,12 @@ async fn main() -> anyhow::Result<()> {
     println!(r#"  -H "Content-Type: application/json" \"#);
     println!(r#"  -d '["#);
     println!(r#"    {{"jsonrpc":"2.0","method":"ping","params":{{}},"id":1}},"#);
-    println!(r#"    {{"jsonrpc":"2.0","method":"get_balance","params":{{"address":"0xAlice"}},"id":2}},"#);
-    println!(r#"    {{"jsonrpc":"2.0","method":"get_balance","params":{{"address":"0xBob"}},"id":3}},"#);
+    println!(
+        r#"    {{"jsonrpc":"2.0","method":"get_balance","params":{{"address":"0xAlice"}},"id":2}},"#
+    );
+    println!(
+        r#"    {{"jsonrpc":"2.0","method":"get_balance","params":{{"address":"0xBob"}},"id":3}},"#
+    );
     println!(r#"    {{"jsonrpc":"2.0","method":"list_accounts","params":{{}},"id":4}}"#);
     println!(r#"  ]'"#);
     println!();
@@ -45,9 +48,7 @@ async fn main() -> anyhow::Result<()> {
     println!();
 
     // Run server
-    transport::HttpTransport::new(server)
-        .serve(addr)
-        .await?;
+    transport::HttpTransport::new(server).serve(addr).await?;
 
     Ok(())
 }

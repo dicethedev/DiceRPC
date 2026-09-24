@@ -15,13 +15,26 @@ DiceRPC gives you a small handler registry, HTTP and TCP transports, batch reque
 - Batch request handlers
 - CLI clients and integration tests
 
+## Use cases
+
+DiceRPC is useful when you need a small, customizable RPC layer rather than a full web framework:
+
+- **Internal service APIs** — expose typed business operations to trusted services over HTTP or TCP.
+- **Blockchain tooling and simulators** — prototype node-style methods, transaction flows, wallets, and test harnesses.
+- **Developer tools** — control local processes, emulators, indexers, or background workers through a simple RPC interface.
+- **Protocol experiments** — compare HTTP, newline-delimited TCP, and framed TCP behavior around the same method registry.
+- **Teaching and testing** — demonstrate async handlers, middleware, shared state, batch calls, metrics, and graceful shutdown.
+
+DiceRPC is not yet intended to replace a hardened public API gateway. Put internet-facing deployments behind TLS, authentication, authorization, and edge-level abuse controls.
+
 ## Features
 
 - Async method registration and concurrent execution with Tokio
 - HTTP endpoints at `/` and `/rpc`
 - TCP transport with legacy newline-delimited and length-prefixed modes
 - Single and batch request processing
-- API-key middleware for HTTP request parameters
+- API-key middleware for HTTP headers, request parameters, and framed TCP requests
+- Configurable body/frame, batch, connection/concurrency, and timeout limits
 - Thread-safe in-memory account and transaction state
 - Request counts, errors, latency metrics, and tracing
 - Health and metrics endpoints for metrics-enabled HTTP servers
@@ -161,7 +174,6 @@ A successful response contains `result`:
 {
   "jsonrpc": "2.0",
   "result": { "address": "0xAlice", "balance": "100000" },
-  "error": null,
   "id": 1
 }
 ```
@@ -181,7 +193,36 @@ curl --request POST http://127.0.0.1:3000/rpc \
   ]'
 ```
 
-Batch entries are processed concurrently. Applications should set their own batch-size and concurrency limits before accepting untrusted traffic.
+Batch entries are processed concurrently. DiceRPC applies a default batch limit of 100; tune this and the concurrency limits for your workload before accepting untrusted traffic.
+
+## Resource limits
+
+Network-facing transports have conservative defaults and builder methods for tuning them:
+
+| Transport | Default limits | Builder methods |
+| --- | --- | --- |
+| HTTP | 1 MiB body, 100 batch entries, 256 concurrent requests, 30-second timeout | `with_max_body_size`, `with_max_batch_size`, `with_max_concurrency`, `with_request_timeout` |
+| Framed TCP | 1 MiB frame, 100 batch entries, 1,024 connections, 30-second timeout | `with_max_frame_size`, `with_max_batch_size`, `with_max_connections`, `with_request_timeout` |
+
+These are application-level safeguards, not a replacement for proxy, firewall, and operating-system limits.
+
+## Authentication
+
+For HTTP, header authentication keeps credentials out of the JSON-RPC parameters:
+
+```bash
+export API_KEYS='replace-with-a-long-random-secret'
+cargo run -- http-server --auth
+
+curl --request POST http://127.0.0.1:3000/rpc \
+  --header 'Content-Type: application/json' \
+  --header 'x-api-key: replace-with-a-long-random-secret' \
+  --data '{"jsonrpc":"2.0","method":"ping","params":{},"id":1}'
+```
+
+Framed TCP uses `ApiKeyInParams`, so each request includes `"api_key"` in its `params` object. `ApiKeyInHeader` is available only to HTTP because TCP requests do not contain HTTP headers.
+
+API keys are compared in constant time. Authentication does not provide per-method authorization, TLS, identity roles, or key storage; applications must add those controls for their environment.
 
 ## Included demonstration methods
 
@@ -228,13 +269,14 @@ The [`examples`](examples) directory is the fastest way to explore individual fe
 | `http_client` | HTTP client requests |
 | `http_batch_requests` | HTTP batch calls |
 | `http_with_auth` | Parameter-based API keys over HTTP |
+| `http_with_header_auth` | Recommended `x-api-key` HTTP authentication |
 | `http_with_no_auth` | Explicit unauthenticated HTTP setup |
 | `http_with_state` | Shared application state over HTTP |
 | `http_full_featured` | HTTP features used together |
-| `production_http` | Environment-driven HTTP configuration example |
+| `production_http` | Environment-driven auth and resource limits |
 | `tcp_basic` | Minimal TCP server |
 | `tcp_framed` | Length-prefixed TCP messages |
-| `tcp_with_auth` | Current TCP authentication example; see Security |
+| `tcp_with_auth` | Parameter-based authentication over framed TCP |
 | `tcp_with_state` | Shared application state over TCP |
 | `tcp_client_advanced` | Advanced TCP client usage |
 | `tcp_full_featured` | TCP features used together |
@@ -295,9 +337,10 @@ Please report suspected vulnerabilities through [GitHub Security Advisories](htt
 The roadmap is intentionally flexible while the core API matures:
 
 - [ ] Complete JSON-RPC 2.0 compliance tests
-- [ ] Enforce authentication consistently across transports
-- [ ] Add header-based HTTP authentication and authorization hooks
-- [ ] Add configurable request, batch, connection, and timeout limits
+- [x] Enforce authentication consistently across transports
+- [x] Add header-based HTTP authentication
+- [x] Add configurable request, batch, connection, and timeout limits
+- [ ] Add per-method authorization hooks
 - [ ] Add TLS and reverse-proxy deployment documentation
 - [ ] Add persistent state adapters
 - [ ] Add WebSocket transport

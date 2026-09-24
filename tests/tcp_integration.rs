@@ -69,7 +69,7 @@ mod tcp_tests {
         tokio::spawn(async move {
             let server = Arc::new(RpcServer::new());
             rpc::register_default_handlers(&server).await;
-            let _ = server::server::run(addr).await;
+            let _ = server::server::serve(addr, server).await;
         });
 
         // Give server time to start
@@ -89,25 +89,21 @@ mod tcp_tests {
         tokio::spawn(async move {
             let server = Arc::new(RpcServer::new());
             let state = Arc::new(state::StateStore::new());
-            
+
             // Initialize with test data
             state.set_balance("0xAlice", 1000).await;
             state.set_balance("0xBob", 500).await;
-            
+
             server::handlers::register_stateful_handlers(&server, state).await;
-            let _ = server::server::run(addr).await;
+            let _ = server::server::serve(addr, server).await;
         });
 
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Test get_balance
-        let response = send_request(
-            addr,
-            "get_balance",
-            json!({"address": "0xAlice"}),
-        )
-        .await
-        .unwrap();
+        let response = send_request(addr, "get_balance", json!({"address": "0xAlice"}))
+            .await
+            .unwrap();
 
         assert!(response.error.is_none());
         let result = response.result.unwrap();
@@ -127,7 +123,7 @@ mod tcp_tests {
         tokio::spawn(async move {
             let server = Arc::new(RpcServer::new());
             server::handlers::register_stateful_handlers(&server, state_clone).await;
-            let _ = server::server::run(addr).await;
+            let _ = server::server::serve(addr, server).await;
         });
 
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -164,7 +160,7 @@ mod tcp_tests {
         tokio::spawn(async move {
             let server = Arc::new(RpcServer::new());
             rpc::register_default_handlers(&server).await;
-            
+
             let config = transport::tcp::TcpServerConfig::new(addr, server);
             let _ = transport::tcp::run_with_framing(config).await;
         });
@@ -172,9 +168,7 @@ mod tcp_tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Test with framed protocol
-        let response = send_framed_request(addr, "ping", json!({}))
-            .await
-            .unwrap();
+        let response = send_framed_request(addr, "ping", json!({})).await.unwrap();
 
         assert!(response.error.is_none());
         assert_eq!(response.result, Some(json!("pong")));
@@ -232,8 +226,7 @@ mod tcp_tests {
             ));
             auth.add_key("test-key-123").await;
 
-            let config = transport::tcp::TcpServerConfig::new(addr, server)
-                .with_auth(auth);
+            let config = transport::tcp::TcpServerConfig::new(addr, server).with_auth(auth);
 
             let _ = transport::tcp::run_with_framing(config).await;
         });
@@ -241,23 +234,15 @@ mod tcp_tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         // Test with valid key
-        let response = send_framed_request(
-            addr,
-            "ping",
-            json!({"api_key": "test-key-123"}),
-        )
-        .await
-        .unwrap();
+        let response = send_framed_request(addr, "ping", json!({"api_key": "test-key-123"}))
+            .await
+            .unwrap();
         assert!(response.error.is_none());
 
         // Test with invalid key
-        let response = send_framed_request(
-            addr,
-            "ping",
-            json!({"api_key": "wrong-key"}),
-        )
-        .await
-        .unwrap();
+        let response = send_framed_request(addr, "ping", json!({"api_key": "wrong-key"}))
+            .await
+            .unwrap();
         assert!(response.error.is_some());
     }
 
@@ -268,7 +253,7 @@ mod tcp_tests {
         tokio::spawn(async move {
             let server = Arc::new(RpcServer::new());
             rpc::register_default_handlers(&server).await;
-            let _ = server::server::run(addr).await;
+            let _ = server::server::serve(addr, server).await;
         });
 
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;

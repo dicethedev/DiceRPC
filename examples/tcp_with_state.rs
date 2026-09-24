@@ -1,8 +1,7 @@
 /// TCP server with persistent state
-/// 
+///
 /// Run with:
 /// cargo run --example tcp_with_state --features tcp
-
 use dice_rpc::*;
 use std::sync::Arc;
 
@@ -49,7 +48,9 @@ async fn main() -> anyhow::Result<()> {
     println!();
     println!("Example commands:");
     println!(r#"  cargo run -- client --method get_balance --params '{{"address":"0xAlice"}}'"#);
-    println!(r#"  cargo run -- client --method transfer --params '{{"from":"0xAlice","to":"0xBob","amount":1000}}'"#);
+    println!(
+        r#"  cargo run -- client --method transfer --params '{{"from":"0xAlice","to":"0xBob","amount":1000}}'"#
+    );
     println!();
 
     // Run server

@@ -1,7 +1,7 @@
 use clap::Parser;
 use serde_json::json;
-use tokio::net::TcpStream;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::TcpStream;
 
 #[derive(Parser, Debug)]
 pub struct ClientArgs {
@@ -18,10 +18,9 @@ pub struct ClientArgs {
     pub params: String,
 }
 
-
 pub async fn run_client(args: ClientArgs) -> anyhow::Result<()> {
     let stream = TcpStream::connect(&args.addr).await?;
-    
+
     // Split the stream into read and write halves
     let (read_half, mut write_half) = stream.into_split();
     let mut reader = BufReader::new(read_half);
@@ -46,4 +45,3 @@ pub async fn run_client(args: ClientArgs) -> anyhow::Result<()> {
 
     Ok(())
 }
-

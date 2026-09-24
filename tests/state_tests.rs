@@ -227,7 +227,7 @@ async fn test_transfer_to_new_account() {
     store.set_balance("0xAlice", 1000).await;
 
     // Transfer to non-existent account
-    let tx = store
+    let _tx = store
         .transfer("0xAlice", "0xNewAccount", 300)
         .await
         .unwrap();
@@ -374,4 +374,27 @@ async fn test_complex_transaction_flow() {
     assert_eq!(alice.nonce, 2); // Sent twice
     assert_eq!(bob.nonce, 1); // Sent once
     assert_eq!(carol.nonce, 1); // Sent once
+}
+
+#[tokio::test]
+async fn transfer_rejects_receiver_balance_overflow_without_mutating_state() {
+    let store = StateStore::new();
+    store.set_balance("0xAlice", 10).await;
+    store.set_balance("0xBob", u64::MAX).await;
+
+    let result = store.transfer("0xAlice", "0xBob", 1).await;
+    assert_eq!(result.unwrap_err(), "Receiver balance overflow");
+    assert_eq!(store.get_balance("0xAlice").await, Some(10));
+    assert_eq!(store.get_balance("0xBob").await, Some(u64::MAX));
+}
+
+#[tokio::test]
+async fn self_transfer_preserves_balance_and_increments_nonce() {
+    let store = StateStore::new();
+    store.set_balance("0xAlice", 10).await;
+
+    store.transfer("0xAlice", "0xAlice", 5).await.unwrap();
+    let account = store.get_or_create_account("0xAlice").await;
+    assert_eq!(account.balance, 10);
+    assert_eq!(account.nonce, 1);
 }

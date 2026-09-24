@@ -1,8 +1,7 @@
 /// HTTP server with persistent state
-/// 
+///
 /// Run with:
 /// cargo run --example http_with_state --features http
-
 use dice_rpc::*;
 use std::sync::Arc;
 
@@ -51,12 +50,16 @@ async fn main() -> anyhow::Result<()> {
     println!("Get balance:");
     println!(r#"curl -X POST http://127.0.0.1:3000/rpc \"#);
     println!(r#"  -H "Content-Type: application/json" \"#);
-    println!(r#"  -d '{{"jsonrpc":"2.0","method":"get_balance","params":{{"address":"0xAlice"}},"id":1}}'"#);
+    println!(
+        r#"  -d '{{"jsonrpc":"2.0","method":"get_balance","params":{{"address":"0xAlice"}},"id":1}}'"#
+    );
     println!();
     println!("Transfer:");
     println!(r#"curl -X POST http://127.0.0.1:3000/rpc \"#);
     println!(r#"  -H "Content-Type: application/json" \"#);
-    println!(r#"  -d '{{"jsonrpc":"2.0","method":"transfer","params":{{"from":"0xAlice","to":"0xBob","amount":1000}},"id":2}}'"#);
+    println!(
+        r#"  -d '{{"jsonrpc":"2.0","method":"transfer","params":{{"from":"0xAlice","to":"0xBob","amount":1000}},"id":2}}'"#
+    );
     println!();
     println!("List all accounts:");
     println!(r#"curl -X POST http://127.0.0.1:3000/rpc \"#);
@@ -65,9 +68,7 @@ async fn main() -> anyhow::Result<()> {
     println!();
 
     // Run server
-    transport::HttpTransport::new(server)
-        .serve(addr)
-        .await?;
+    transport::HttpTransport::new(server).serve(addr).await?;
 
     Ok(())
 }

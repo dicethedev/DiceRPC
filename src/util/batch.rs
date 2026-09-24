@@ -1,6 +1,6 @@
+use crate::rpc::{RpcRequest, RpcResponse, RpcServer};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use crate::rpc::{RpcRequest, RpcResponse, RpcServer};
 
 /// Represents either a single request or a batch of requests
 #[derive(Debug, Deserialize)]
@@ -50,9 +50,7 @@ impl RpcServer {
     /// Handle a batch request by processing all requests concurrently
     pub async fn handle_batch(&self, batch: BatchRequest) -> BatchResponse {
         match batch {
-            BatchRequest::Single(req) => {
-                BatchResponse::Single(self.handle_request(req).await)
-            }
+            BatchRequest::Single(req) => BatchResponse::Single(self.handle_request(req).await),
             BatchRequest::Batch(requests) => {
                 if requests.is_empty() {
                     // Empty batch is invalid
@@ -105,11 +103,11 @@ mod tests {
         use crate::rpc::RpcServer;
 
         let server = RpcServer::new();
-        
+
         // Register a simple handler
-        server.register("ping", |_| async move {
-            Ok(json!("pong"))
-        }).await;
+        server
+            .register("ping", |_| async move { Ok(json!("pong")) })
+            .await;
 
         // Create batch request
         let requests = vec![

@@ -63,7 +63,7 @@ impl StateStore {
             })
             .clone()
     }
-    
+
     #[allow(dead_code)]
     /// Get account balance
     pub async fn get_balance(&self, address: &str) -> Option<u64> {
@@ -95,29 +95,47 @@ impl StateStore {
     pub async fn transfer(&self, from: &str, to: &str, amount: u64) -> Result<Transaction, String> {
         let mut accounts = self.accounts.write().await;
 
-        // Get sender account
-        let sender = accounts
-            .get_mut(from)
-            .ok_or_else(|| "Sender account not found".to_string())?;
+        let sender_balance = accounts
+            .get(from)
+            .ok_or_else(|| "Sender account not found".to_string())?
+            .balance;
 
-        // Check balance
-        if sender.balance < amount {
+        if sender_balance < amount {
             return Err("Insufficient balance".to_string());
         }
 
-        // Deduct from sender
-        sender.balance -= amount;
-        sender.nonce += 1;
+        if from == to {
+            let sender = accounts
+                .get_mut(from)
+                .ok_or_else(|| "Sender account not found".to_string())?;
+            sender.nonce = sender
+                .nonce
+                .checked_add(1)
+                .ok_or_else(|| "Sender nonce overflow".to_string())?;
+        } else {
+            let receiver_balance = accounts.get(to).map_or(0, |account| account.balance);
+            let new_receiver_balance = receiver_balance
+                .checked_add(amount)
+                .ok_or_else(|| "Receiver balance overflow".to_string())?;
 
-        // Add to receiver (create if doesn't exist)
-        accounts
-            .entry(to.to_string())
-            .and_modify(|acc| acc.balance += amount)
-            .or_insert(Account {
-                address: to.to_string(),
-                balance: amount,
-                nonce: 0,
-            });
+            let sender = accounts
+                .get_mut(from)
+                .ok_or_else(|| "Sender account not found".to_string())?;
+            sender.balance = sender_balance - amount;
+            sender.nonce = sender
+                .nonce
+                .checked_add(1)
+                .ok_or_else(|| "Sender nonce overflow".to_string())?;
+
+            accounts
+                .entry(to.to_string())
+                .and_modify(|account| account.balance = new_receiver_balance)
+                .or_insert(Account {
+                    address: to.to_string(),
+                    balance: new_receiver_balance,
+                    nonce: 0,
+                });
+        }
 
         // Create transaction record
         let tx = Transaction {
@@ -127,7 +145,7 @@ impl StateStore {
             amount,
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs(),
             status: TransactionStatus::Pending,
         };
@@ -140,14 +158,14 @@ impl StateStore {
 
         Ok(tx)
     }
-    
-     #[allow(dead_code)]
+
+    #[allow(dead_code)]
     /// Get transaction by ID
     pub async fn get_transaction(&self, txid: &str) -> Option<Transaction> {
         self.transactions.read().await.get(txid).cloned()
     }
-    
-     #[allow(dead_code)]
+
+    #[allow(dead_code)]
     /// Confirm a pending transaction
     pub async fn confirm_transaction(&self, txid: &str) -> Result<(), String> {
         let mut transactions = self.transactions.write().await;
@@ -158,7 +176,7 @@ impl StateStore {
         tx.status = TransactionStatus::Confirmed;
         Ok(())
     }
-   
+
     #[allow(dead_code)]
     /// Get all transactions for an address
     pub async fn get_transactions_for_address(&self, address: &str) -> Vec<Transaction> {
@@ -171,7 +189,7 @@ impl StateStore {
             .collect()
     }
 
-     #[allow(dead_code)]
+    #[allow(dead_code)]
     /// Get all accounts
     pub async fn get_all_accounts(&self) -> Vec<Account> {
         self.accounts.read().await.values().cloned().collect()

@@ -1,21 +1,29 @@
-use tokio::net::{TcpListener, TcpStream};
-use crate::rpc::{RpcServer, parse_rpc_request};
-use crate::transport::framing::FrameCodec;
-use crate::util::batch::{BatchRequest, BatchResponse};
-use crate::middleware::auth::AuthMiddleware;
+use crate::middleware::auth::{AuthMiddleware, AuthenticatedServer};
+use crate::rpc::{INTERNAL_ERROR, INVALID_REQUEST, PARSE_ERROR, RpcResponse, RpcServer};
 use crate::server::metrics::{Metrics, RequestTracer};
-use crate::transport::shutdown::ShutdownCoordinator;use anyhow::Result;
+use crate::transport::framing::{DEFAULT_MAX_FRAME_SIZE, FrameCodec};
+use crate::transport::shutdown::ShutdownCoordinator;
+use crate::util::batch::{BatchRequest, BatchResponse};
+use anyhow::{Result, anyhow};
 use std::sync::Arc;
-use tracing::{info, error};
-use tokio::io::AsyncWriteExt;
-use tokio::io::AsyncBufReadExt;
-use tokio::io::BufReader;
+use std::time::Duration;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Semaphore;
+use tracing::{error, info, warn};
+
+const DEFAULT_MAX_BATCH_SIZE: usize = 100;
+const DEFAULT_MAX_CONNECTIONS: usize = 1024;
+const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct TcpServerConfig {
     pub addr: String,
     pub server: Arc<RpcServer>,
     pub auth: Option<Arc<AuthMiddleware>>,
     pub metrics: Arc<Metrics>,
+    pub max_frame_size: usize,
+    pub max_batch_size: usize,
+    pub max_connections: usize,
+    pub request_timeout: Duration,
 }
 
 impl TcpServerConfig {
@@ -25,6 +33,10 @@ impl TcpServerConfig {
             server,
             auth: None,
             metrics: Arc::new(Metrics::new()),
+            max_frame_size: DEFAULT_MAX_FRAME_SIZE,
+            max_batch_size: DEFAULT_MAX_BATCH_SIZE,
+            max_connections: DEFAULT_MAX_CONNECTIONS,
+            request_timeout: DEFAULT_REQUEST_TIMEOUT,
         }
     }
 
@@ -37,17 +49,36 @@ impl TcpServerConfig {
         self.metrics = metrics;
         self
     }
+
+    pub fn with_max_frame_size(mut self, bytes: usize) -> Self {
+        self.max_frame_size = bytes.max(1);
+        self
+    }
+
+    pub fn with_max_batch_size(mut self, requests: usize) -> Self {
+        self.max_batch_size = requests.max(1);
+        self
+    }
+
+    pub fn with_max_connections(mut self, connections: usize) -> Self {
+        self.max_connections = connections.max(1);
+        self
+    }
+
+    pub fn with_request_timeout(mut self, timeout: Duration) -> Self {
+        self.request_timeout = timeout;
+        self
+    }
 }
 
-/// Run TCP server with length-prefixed framing
+/// Run a length-prefixed TCP server with bounded frames, batches, connections,
+/// and request execution time.
 pub async fn run_with_framing(config: TcpServerConfig) -> Result<()> {
     let listener = TcpListener::bind(&config.addr).await?;
     info!("DiceRPC TCP server (framed) listening on {}", config.addr);
 
     let shutdown = Arc::new(ShutdownCoordinator::new());
     let shutdown_clone = shutdown.clone();
-    
-    // Spawn signal handler
     tokio::spawn(async move {
         shutdown_clone.wait_for_signal().await;
     });
@@ -55,6 +86,10 @@ pub async fn run_with_framing(config: TcpServerConfig) -> Result<()> {
     let server = config.server;
     let auth = config.auth;
     let metrics = config.metrics;
+    let max_frame_size = config.max_frame_size;
+    let max_batch_size = config.max_batch_size;
+    let request_timeout = config.request_timeout;
+    let connection_limit = Arc::new(Semaphore::new(config.max_connections));
     let mut shutdown_rx = shutdown.subscribe();
 
     loop {
@@ -62,19 +97,35 @@ pub async fn run_with_framing(config: TcpServerConfig) -> Result<()> {
             accept_result = listener.accept() => {
                 match accept_result {
                     Ok((socket, _)) => {
+                        let permit = match connection_limit.clone().try_acquire_owned() {
+                            Ok(permit) => permit,
+                            Err(_) => {
+                                warn!("Connection limit reached; rejecting TCP client");
+                                continue;
+                            }
+                        };
                         let server = server.clone();
                         let auth = auth.clone();
                         let metrics = metrics.clone();
-                        
+
                         tokio::spawn(async move {
-                            if let Err(e) = handle_framed_connection(server, socket, auth, metrics).await {
-                                error!("Connection error: {:?}", e);
+                            let _permit = permit;
+                            if let Err(error) = handle_framed_connection(
+                                server,
+                                socket,
+                                auth,
+                                metrics,
+                                max_frame_size,
+                                max_batch_size,
+                                request_timeout,
+                            )
+                            .await
+                            {
+                                error!("Connection error: {error:?}");
                             }
                         });
                     }
-                    Err(e) => {
-                        error!("Failed to accept connection: {:?}", e);
-                    }
+                    Err(error) => error!("Failed to accept connection: {error:?}"),
                 }
             }
             _ = shutdown_rx.recv() => {
@@ -92,58 +143,75 @@ async fn handle_framed_connection(
     mut stream: TcpStream,
     auth: Option<Arc<AuthMiddleware>>,
     metrics: Arc<Metrics>,
+    max_frame_size: usize,
+    max_batch_size: usize,
+    request_timeout: Duration,
 ) -> Result<()> {
     loop {
-        // Read framed message
-        let frame = match FrameCodec::read_frame(&mut stream).await {
-            Ok(f) => f,
-            Err(e) => {
-                if e.to_string().contains("unexpected end of file") {
-                    // Client disconnected
-                    break;
-                }
-                return Err(e);
-            }
+        let frame = match tokio::time::timeout(
+            request_timeout,
+            FrameCodec::read_frame_with_limit(&mut stream, max_frame_size),
+        )
+        .await
+        {
+            Ok(Ok(frame)) => frame,
+            Err(_) => return Err(anyhow!("Timed out while reading TCP frame")),
+            Ok(Err(error)) if error.to_string().contains("unexpected end of file") => break,
+            Ok(Err(error)) => return Err(error),
         };
 
-        // Parse as JSON string
-        let raw = String::from_utf8(frame)?;
-        
-        // Parse as batch request
-        let batch_req = match BatchRequest::parse(&raw) {
-            Ok(req) => req,
-            Err(e) => {
-                let error_resp = crate::rpc::RpcResponse::with_error(
+        let raw = std::str::from_utf8(&frame)?;
+        let batch = match BatchRequest::parse(raw) {
+            Ok(batch) => batch,
+            Err(error) => {
+                let response = RpcResponse::with_error(
                     serde_json::Value::Null,
-                    -32700,
-                    format!("Parse error: {}", e),
+                    PARSE_ERROR,
+                    format!("Parse error: {error}"),
                 );
-                let resp_bytes = serde_json::to_vec(&error_resp)?;
-                FrameCodec::write_frame(&mut stream, &resp_bytes).await?;
+                write_response(&mut stream, &response, max_frame_size).await?;
                 continue;
             }
         };
 
-        // Track request
-        let method = match &batch_req {
-            BatchRequest::Single(req) => req.method.clone(),
-            BatchRequest::Batch(reqs) => format!("batch({})", reqs.len()),
+        if batch.len() > max_batch_size {
+            let response = RpcResponse::with_error(
+                serde_json::Value::Null,
+                INVALID_REQUEST,
+                format!("Batch exceeds maximum of {max_batch_size} requests"),
+            );
+            write_response(&mut stream, &response, max_frame_size).await?;
+            continue;
+        }
+
+        let method = match &batch {
+            BatchRequest::Single(request) => request.method.clone(),
+            BatchRequest::Batch(requests) => format!("batch({})", requests.len()),
         };
-        
         let tracer = RequestTracer::new(&method, metrics.clone());
 
-        // Handle request
-        let batch_resp = if let Some(ref auth_arc) = auth {
-            // pass an Arc<RpcServer> and a reference to the middleware implementation
-           handle_authenticated_batch(server.clone(), batch_req, &auth_arc).await
-        } else {
-            server_handle_batch(server.clone(), batch_req).await
+        let response_future = async {
+            if let Some(auth) = auth.as_deref() {
+                handle_authenticated_batch(server.clone(), batch, auth).await
+            } else {
+                server.handle_batch(batch).await
+            }
         };
 
-        // Check if response contains errors
-        let has_error = match &batch_resp {
-            BatchResponse::Single(resp) => resp.error.is_some(),
-            BatchResponse::Batch(resps) => resps.iter().any(|r| r.error.is_some()),
+        let response = match tokio::time::timeout(request_timeout, response_future).await {
+            Ok(response) => response,
+            Err(_) => BatchResponse::Single(RpcResponse::with_error(
+                serde_json::Value::Null,
+                INTERNAL_ERROR,
+                "Request timed out",
+            )),
+        };
+
+        let has_error = match &response {
+            BatchResponse::Single(response) => response.error.is_some(),
+            BatchResponse::Batch(responses) => {
+                responses.iter().any(|response| response.error.is_some())
+            }
         };
 
         if has_error {
@@ -152,118 +220,49 @@ async fn handle_framed_connection(
             tracer.success().await;
         }
 
-        // Send response
-        let resp_bytes = serde_json::to_vec(&batch_resp)?;
-        FrameCodec::write_frame(&mut stream, &resp_bytes).await?;
+        write_response(&mut stream, &response, max_frame_size).await?;
     }
 
     Ok(())
 }
-
 
 async fn handle_authenticated_batch(
     server: Arc<RpcServer>,
     batch: BatchRequest,
-    _auth: &AuthMiddleware,
+    auth: &AuthMiddleware,
 ) -> BatchResponse {
     match batch {
-        BatchRequest::Single(req) => {
-            // Use the existing handle_request method on RpcServer
-            BatchResponse::Single(server.handle_request(req).await)
+        BatchRequest::Single(request) => {
+            BatchResponse::Single(server.handle_authenticated_request(request, auth).await)
         }
         BatchRequest::Batch(requests) => {
-            // Spawn futures that call handle_request on clones of the Arc<RpcServer>
-            let futures: Vec<_> = requests
-                .into_iter()
-                .map(|req| {
-                    let srv = server.clone();
-                    async move { srv.handle_request(req).await }
-                })
-                .collect();
-
-            let responses = futures::future::join_all(futures).await;
-            BatchResponse::Batch(responses)
-        }
-    }
-}
-
-async fn server_handle_batch(server: Arc<RpcServer>, batch: BatchRequest) -> BatchResponse {
-    match batch {
-        BatchRequest::Single(req) => {
-            // Delegate single request to RpcServer::handle_request
-            BatchResponse::Single(server.handle_request(req).await)
-        }
-        BatchRequest::Batch(requests) => {
-            // Spawn futures that call handle_request on clones of the Arc<RpcServer>
-            let futures: Vec<_> = requests
-                .into_iter()
-                .map(|req| {
-                    let srv = server.clone();
-                    async move { srv.handle_request(req).await }
-                })
-                .collect();
-
-            let responses = futures::future::join_all(futures).await;
-            BatchResponse::Batch(responses)
-        }
-    }
-}
-
-/// Legacy newline-delimited server (for backwards compatibility)
-pub async fn run(addr: &str) -> Result<()> {    
-    let listener = TcpListener::bind(addr).await?;
-    info!("DiceRPC TCP server (line-delimited) listening on {}", addr);
-
-    let server = Arc::new(RpcServer::new());
-    crate::rpc::register_default_handlers(&server).await;
-
-    loop {
-        let (socket, _) = listener.accept().await?;
-        let server = server.clone();
-        tokio::spawn(async move {
-            if let Err(e) = handle_connection_legacy(server, socket).await {
-                error!("Connection error: {:?}", e);
-            }
-        });
-    }
-}
-
-async fn handle_connection_legacy(server: Arc<RpcServer>, stream: TcpStream) -> Result<()> {
-    let (reader, mut writer) = stream.into_split();
-    let mut br = BufReader::new(reader);
-    let mut line = String::new();
-
-    loop {
-        line.clear();
-        let n = br.read_line(&mut line).await?;
-        if n == 0 {
-            break;
-        }
-
-        let raw = line.trim_end();
-        if raw.is_empty() {
-            continue;
-        }
-
-        match parse_rpc_request(raw) {
-            Ok(req) => {
-                let resp = server.handle_request(req).await;
-                let resp_text = serde_json::to_string(&resp)?;
-                writer.write_all(resp_text.as_bytes()).await?;
-                writer.write_all(b"\n").await?;
-            }
-            Err(e) => {
-                let err_resp = crate::rpc::RpcResponse::with_error(
+            if requests.is_empty() {
+                return BatchResponse::Single(RpcResponse::with_error(
                     serde_json::Value::Null,
-                    -32700,
-                    format!("Parse error: {}", e),
-                );
-                let resp_text = serde_json::to_string(&err_resp)?;
-                writer.write_all(resp_text.as_bytes()).await?;
-                writer.write_all(b"\n").await?;
+                    INVALID_REQUEST,
+                    "Invalid Request: empty batch",
+                ));
             }
+
+            let futures = requests.into_iter().map(|request| {
+                let server = server.clone();
+                async move { server.handle_authenticated_request(request, auth).await }
+            });
+            BatchResponse::Batch(futures::future::join_all(futures).await)
         }
     }
+}
 
-    Ok(())
+async fn write_response<T: serde::Serialize>(
+    stream: &mut TcpStream,
+    response: &T,
+    max_frame_size: usize,
+) -> Result<()> {
+    let bytes = serde_json::to_vec(response)?;
+    FrameCodec::write_frame_with_limit(stream, &bytes, max_frame_size).await
+}
+
+/// Run the legacy newline-delimited TCP server.
+pub async fn run(addr: &str) -> Result<()> {
+    crate::server::server::run(addr).await
 }

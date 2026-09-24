@@ -2,35 +2,41 @@
 name = "dice_rpc"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/dicethedev/DiceRPC"
+description = "A lightweight asynchronous JSON-RPC toolkit for Rust"
+readme = "README.md"
+keywords = ["json-rpc", "rpc", "async", "http", "tcp"]
+categories = ["network-programming", "asynchronous"]
 
 
 [dependencies]
-tokio = { version = "1", features = ["full"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-clap = { version = "4.2", features = ["derive"] }
-uuid = { version = "1", features = ["v4", "serde"] }
-anyhow = "1.0"
+tokio = { version = "1.53.1", features = ["full"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+clap = { version = "4.6.7", features = ["derive"] }
+uuid = { version = "1.26.1", features = ["v4", "serde"] }
+anyhow = "1.0.104"
+subtle = "2.6.1"
 
 # HTTP transport
-axum = { version = "0.7", optional = true }
-tower = { version = "0.4", optional = true }
-tower-http = { version = "0.5", features = ["trace"], optional = true }
+axum = { version = "0.8.9", optional = true }
+tower = { version = "0.5.3", features = ["limit", "util"], optional = true }
+tower-http = { version = "0.7.1", features = ["timeout", "trace"], optional = true }
 
 # Logging and tracing
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 # Async utilities
-futures = "0.3"
-reqwest = { version = "0.12.24", features = ["json"] }
+futures = "0.3.34"
+reqwest = { version = "0.13.5", features = ["json"] }
 
 
 
 [dev-dependencies]
-tokio-test = "0.4"
+tokio-test = "0.4.5"
 
 
 [features]

@@ -30,3 +30,14 @@ async fn test_multiple_frames() {
         assert_eq!(result, *expected);
     }
 }
+
+#[tokio::test]
+async fn oversized_frame_is_rejected_before_payload_allocation() {
+    let mut bytes = Vec::from((1024_u32).to_be_bytes());
+    bytes.extend_from_slice(b"ignored");
+    let mut reader = BufReader::new(bytes.as_slice());
+    let error = FrameCodec::read_frame_with_limit(&mut reader, 64)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("Frame too large"));
+}

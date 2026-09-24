@@ -1,13 +1,6 @@
-mod client;
-mod macros;
-mod middleware;
-mod rpc;
-mod server;
-mod state;
-mod transport;
-mod util;
-
+use anyhow::{Context, bail};
 use clap::{Parser, Subcommand};
+use dice_rpc::{RpcServer, client, middleware, server, state, transport};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -89,10 +82,9 @@ async fn main() -> anyhow::Result<()> {
 
 #[cfg(feature = "tcp")]
 async fn run_tcp_server(addr: &str, enable_auth: bool) -> anyhow::Result<()> {
-    use crate::middleware::{AuthMiddleware, AuthStrategy};
-    use crate::rpc::RpcServer;
-    use crate::state::StateStore;
-    use crate::transport::tcp::TcpServerConfig;
+    use middleware::AuthStrategy;
+    use state::StateStore;
+    use transport::tcp::TcpServerConfig;
 
     // Create components
     let server = Arc::new(RpcServer::new());
@@ -127,10 +119,8 @@ async fn run_tcp_server(addr: &str, enable_auth: bool) -> anyhow::Result<()> {
 
     // Optionally enable authentication
     if enable_auth {
-        let auth = Arc::new(AuthMiddleware::new(AuthStrategy::ApiKeyInParams));
-        auth.add_key("dev-key-123").await;
-        auth.add_key("prod-key-456").await;
-        println!("Authentication enabled. Valid keys: dev-key-123, prod-key-456");
+        let auth = load_auth_from_env(AuthStrategy::ApiKeyInParams).await?;
+        println!("Authentication enabled with keys loaded from API_KEYS");
         config = config.with_auth(auth);
     }
 
@@ -154,10 +144,9 @@ async fn run_tcp_server(addr: &str, enable_auth: bool) -> anyhow::Result<()> {
 
 #[cfg(feature = "http")]
 async fn run_http_server(addr: &str, enable_auth: bool) -> anyhow::Result<()> {
-    use crate::middleware::{AuthMiddleware, AuthStrategy};
-    use crate::rpc::RpcServer;
-    use crate::state::StateStore;
-    use crate::transport::HttpTransport;
+    use middleware::AuthStrategy;
+    use state::StateStore;
+    use transport::HttpTransport;
 
     // Create components
     let server = Arc::new(RpcServer::new());
@@ -192,10 +181,8 @@ async fn run_http_server(addr: &str, enable_auth: bool) -> anyhow::Result<()> {
 
     // Optionally enable authentication
     if enable_auth {
-        let auth = Arc::new(AuthMiddleware::new(AuthStrategy::ApiKeyInParams));
-        auth.add_key("dev-key-123").await;
-        auth.add_key("prod-key-456").await;
-        println!("Authentication enabled. Valid keys: dev-key-123, prod-key-456");
+        let auth = load_auth_from_env(AuthStrategy::ApiKeyInHeader).await?;
+        println!("Authentication enabled with x-api-key and keys loaded from API_KEYS");
         http = http.with_auth(auth);
     }
 
@@ -220,7 +207,8 @@ async fn run_http_server(addr: &str, enable_auth: bool) -> anyhow::Result<()> {
     println!(r#"curl -X POST http://{}/rpc \"#, addr);
     println!(r#"  -H "Content-Type: application/json" \"#);
     if enable_auth {
-        println!(r#"  -d '{{"jsonrpc":"2.0","method":"ping","params":{{"api_key":"dev-key-123"}},"id":1}}'"#);
+        println!(r#"  -H "x-api-key: $DICERPC_API_KEY" \"#);
+        println!(r#"  -d '{{"jsonrpc":"2.0","method":"ping","params":{{}},"id":1}}'"#);
     } else {
         println!(r#"  -d '{{"jsonrpc":"2.0","method":"ping","params":{{}},"id":1}}'"#);
     }
@@ -231,4 +219,24 @@ async fn run_http_server(addr: &str, enable_auth: bool) -> anyhow::Result<()> {
 
     server::metrics::log_shutdown();
     Ok(())
+}
+
+async fn load_auth_from_env(
+    strategy: middleware::AuthStrategy,
+) -> anyhow::Result<Arc<middleware::AuthMiddleware>> {
+    let raw_keys = std::env::var("API_KEYS")
+        .context("authentication requires API_KEYS as a comma-separated list")?;
+    let auth = Arc::new(middleware::AuthMiddleware::new(strategy));
+    let mut added = 0usize;
+    for key in raw_keys
+        .split(',')
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+    {
+        added += usize::from(auth.add_key(key).await);
+    }
+    if added == 0 {
+        bail!("API_KEYS must contain at least one non-empty key");
+    }
+    Ok(auth)
 }

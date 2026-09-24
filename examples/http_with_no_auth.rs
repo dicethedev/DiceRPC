@@ -1,8 +1,7 @@
 /// Example: Simple HTTP RPC Server (No Auth)
-/// 
+///
 /// Run with:
 /// cargo run --example http_simple --feature http
-
 use dice_rpc::*;
 use std::sync::Arc;
 
@@ -10,10 +9,10 @@ use std::sync::Arc;
 async fn main() -> anyhow::Result<()> {
     // Create server
     let server = Arc::new(RpcServer::new());
-    
+
     // Register handlers
     rpc::register_default_handlers(&server).await;
-    
+
     println!("╔══════════════════════════════════════════════╗");
     println!("║     DiceRPC HTTP Server with no Auth           ║");
     println!("╚══════════════════════════════════════════════╝");

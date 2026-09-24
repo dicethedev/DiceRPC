@@ -1,14 +1,14 @@
 #![cfg(feature = "http")]
 
+use crate::server::metrics::Metrics;
 use axum::{
+    Router,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Json},
     routing::get,
-    Router,
 };
 use std::sync::Arc;
-use crate::server::metrics::Metrics;
 
 /// Add metrics endpoint to HTTP server
 pub fn metrics_router(metrics: Arc<Metrics>) -> Router {
@@ -19,17 +19,18 @@ pub fn metrics_router(metrics: Arc<Metrics>) -> Router {
 }
 
 /// GET /metrics - Returns current metrics
-async fn get_metrics(
-    State(metrics): State<Arc<Metrics>>,
-) -> impl IntoResponse {
+async fn get_metrics(State(metrics): State<Arc<Metrics>>) -> impl IntoResponse {
     let snapshot = metrics.snapshot().await;
     (StatusCode::OK, Json(snapshot))
 }
 
 /// GET /health - Health check endpoint
 async fn health_check() -> impl IntoResponse {
-    (StatusCode::OK, Json(serde_json::json!({
-        "status": "healthy",
-        "service": "DiceRPC"
-    })))
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "status": "healthy",
+            "service": "DiceRPC"
+        })),
+    )
 }

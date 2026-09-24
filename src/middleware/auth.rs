@@ -1,16 +1,15 @@
 use crate::rpc::{RpcErrorObj, RpcRequest, RpcResponse};
 use serde_json::Value;
-use std::collections::HashSet;
 use std::sync::Arc;
+use subtle::ConstantTimeEq;
 use tokio::sync::RwLock;
 
 /// Authentication error codes
 pub const AUTH_ERROR: i64 = -32001;
 pub const AUTH_REQUIRED: i64 = -32002;
 
- #[allow(dead_code)]
 /// Authentication strategy
-#[derive(Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthStrategy {
     /// No authentication required
     None,
@@ -23,33 +22,72 @@ pub enum AuthStrategy {
 /// Authentication middleware for RPC requests
 pub struct AuthMiddleware {
     strategy: AuthStrategy,
-    valid_keys: Arc<RwLock<HashSet<String>>>,
+    valid_keys: Arc<RwLock<Vec<String>>>,
 }
 
 impl AuthMiddleware {
-     #[allow(dead_code)]
     /// Create a new authentication middleware
     pub fn new(strategy: AuthStrategy) -> Self {
         Self {
             strategy,
-            valid_keys: Arc::new(RwLock::new(HashSet::new())),
+            valid_keys: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
-     #[allow(dead_code)]
-    /// Add a valid API key
-    pub async fn add_key(&self, key: impl Into<String>) {
-        self.valid_keys.write().await.insert(key.into());
-    }
-     #[allow(dead_code)]
-    /// Remove an API key
-    pub async fn remove_key(&self, key: &str) {
-        self.valid_keys.write().await.remove(key);
+    /// Add a non-empty API key. Returns `true` when the key was added.
+    pub async fn add_key(&self, key: impl Into<String>) -> bool {
+        let key = key.into();
+        if key.trim().is_empty() {
+            return false;
+        }
+
+        let mut keys = self.valid_keys.write().await;
+        if keys.iter().any(|existing| constant_time_eq(existing, &key)) {
+            return false;
+        }
+        keys.push(key);
+        true
     }
 
-    /// Check if a key is valid
+    /// Remove an API key
+    pub async fn remove_key(&self, key: &str) -> bool {
+        let mut keys = self.valid_keys.write().await;
+        let original_len = keys.len();
+        keys.retain(|existing| !constant_time_eq(existing, key));
+        keys.len() != original_len
+    }
+
+    /// Check if a key is valid using constant-time byte comparison.
     pub async fn is_valid_key(&self, key: &str) -> bool {
-        self.valid_keys.read().await.contains(key)
+        self.valid_keys
+            .read()
+            .await
+            .iter()
+            .any(|candidate| constant_time_eq(candidate, key))
+    }
+
+    pub fn strategy(&self) -> AuthStrategy {
+        self.strategy
+    }
+
+    pub async fn validate_key(&self, key: Option<&str>) -> Result<(), RpcErrorObj> {
+        let key = key
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| RpcErrorObj {
+                code: AUTH_REQUIRED,
+                message: "API key required".to_string(),
+                data: None,
+            })?;
+
+        if self.is_valid_key(key).await {
+            Ok(())
+        } else {
+            Err(RpcErrorObj {
+                code: AUTH_ERROR,
+                message: "Invalid API key".to_string(),
+                data: None,
+            })
+        }
     }
 
     /// Validate a request based on the authentication strategy
@@ -57,10 +95,11 @@ impl AuthMiddleware {
         match &self.strategy {
             AuthStrategy::None => Ok(()),
             AuthStrategy::ApiKeyInParams => self.validate_params_key(req).await,
-            AuthStrategy::ApiKeyInHeader => {
-                // For header-based auth, this would be checked at transport layer
-                Ok(())
-            }
+            AuthStrategy::ApiKeyInHeader => Err(RpcErrorObj {
+                code: AUTH_REQUIRED,
+                message: "Header authentication requires the HTTP transport".to_string(),
+                data: None,
+            }),
         }
     }
 
@@ -85,25 +124,19 @@ impl AuthMiddleware {
             }
         };
 
-        if self.is_valid_key(api_key).await {
-            Ok(())
-        } else {
-            Err(RpcErrorObj {
-                code: AUTH_ERROR,
-                message: "Invalid API key".to_string(),
-                data: None,
-            })
-        }
+        self.validate_key(Some(api_key)).await
     }
- 
 
-     #[allow(dead_code)]
+    #[allow(dead_code)]
     /// Create an authentication error response
     pub fn auth_error_response(id: Value, message: impl Into<String>) -> RpcResponse {
         RpcResponse::with_error(id, AUTH_ERROR, message)
     }
 }
 
+fn constant_time_eq(left: &str, right: &str) -> bool {
+    left.as_bytes().ct_eq(right.as_bytes()).into()
+}
 
 /// Extension trait for RpcServer to add authentication
 #[allow(async_fn_in_trait)]
@@ -124,7 +157,7 @@ impl AuthenticatedServer for crate::rpc::RpcServer {
     ) -> RpcResponse {
         // Validate authentication first
         if let Err(err) = auth.validate_request(&req).await {
-            return RpcResponse::with_error(req.id.clone(), err.code, err.message);
+            return RpcResponse::with_error_obj(req.response_id(), err);
         }
 
         // Process request if authenticated

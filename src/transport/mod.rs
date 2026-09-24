@@ -1,6 +1,6 @@
 pub mod framing;
-pub mod shutdown;
 pub mod metrics_endpoint;
+pub mod shutdown;
 
 #[cfg(feature = "http")]
 pub mod http_transport;

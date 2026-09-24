@@ -52,10 +52,9 @@ The following limitations are already known. Reports are still useful when they 
 
 - The built-in transports do not provide TLS; example HTTP and TCP traffic is plaintext.
 - `ApiKeyInParams` places credentials in the JSON body, where logs and tracing systems may capture them.
-- `ApiKeyInHeader` is currently a placeholder and does not validate an HTTP header.
-- The framed TCP authentication path currently does not enforce its configured `AuthMiddleware`. Do not rely on the `--auth` option or TCP authentication examples for access control.
-- Development keys printed by the CLI and examples are public and are not secrets.
-- Production-grade limits for request bodies, frames, batches, connections, concurrency, and execution time are not yet enforced by the framework.
+- HTTP header authentication uses `x-api-key`, but DiceRPC does not provide per-method authorization or identity roles.
+- Default resource limits are provided, but operators must tune them for their workload and also enforce infrastructure-level limits.
+- The legacy newline-delimited TCP server does not provide the authentication, metrics, batch, timeout, or connection controls of the framed transport.
 - The included state store is demonstration code: it is in memory and does not provide durable or distributed consistency.
 - Metrics endpoints are unauthenticated unless access is restricted outside DiceRPC.
 
@@ -65,10 +64,10 @@ Until the built-in security controls are hardened:
 
 - bind to `127.0.0.1` unless remote access is required;
 - place DiceRPC behind a trusted TLS reverse proxy or API gateway;
-- enforce authentication and per-method authorization at that gateway;
+- prefer `x-api-key` header authentication for HTTP and enforce per-method authorization at a gateway or in handlers;
 - generate strong credentials, store them outside source control, rotate them, and redact them from logs;
 - validate and bound every method parameter;
-- configure request-body, frame, batch, connection, concurrency, and timeout limits at the edge;
+- tune DiceRPC's request-body, frame, batch, connection, concurrency, and timeout limits and reinforce them at the edge;
 - restrict `/metrics` and other operational endpoints;
 - run the process with minimal operating-system and network privileges;
 - pin and audit dependencies; and

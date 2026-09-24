@@ -1,8 +1,7 @@
 /// Basic TCP server example
-/// 
+///
 /// Run with:
 /// cargo run --example tcp_basic
-
 use dice_rpc::*;
 use std::sync::Arc;
 
@@ -15,7 +14,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Create server
     let server = Arc::new(RpcServer::new());
-    
+
     // Register default handlers
     rpc::register_default_handlers(&server).await;
 

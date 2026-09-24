@@ -1,6 +1,6 @@
-use dice_rpc::{BatchRequest, BatchResponse};
 use dice_rpc::RpcRequest;
 use dice_rpc::rpc;
+use dice_rpc::{BatchRequest, BatchResponse};
 use serde_json::json;
 
 #[test]
@@ -59,5 +59,18 @@ async fn test_batch_processing() {
             assert_eq!(responses[1].result, Some(json!("pong")));
         }
         _ => panic!("Expected batch response"),
+    }
+}
+
+#[tokio::test]
+async fn empty_batch_is_invalid() {
+    let response = dice_rpc::RpcServer::new()
+        .handle_batch(BatchRequest::Batch(Vec::new()))
+        .await;
+    match response {
+        BatchResponse::Single(response) => {
+            assert_eq!(response.error.unwrap().code, -32600);
+        }
+        BatchResponse::Batch(_) => panic!("empty batch must return an error object"),
     }
 }

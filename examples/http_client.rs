@@ -1,14 +1,15 @@
 /// HTTP client example
-/// 
+///
 /// Run with:
 /// cargo run --example http_client --features http
-
+use anyhow::Context;
 use serde_json::json;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let client = reqwest::Client::new();
     let url = "http://127.0.0.1:3000/rpc";
+    let api_key = std::env::var("API_KEY").context("set API_KEY before running the client")?;
 
     println!("╔══════════════════════════════════════╗");
     println!("║     DiceRPC HTTP Client              ║");
@@ -22,12 +23,13 @@ async fn main() -> anyhow::Result<()> {
     let ping_req = json!({
         "jsonrpc": "2.0",
         "method": "ping",
-        "params": {"api_key": "dev-secret-key"},
+        "params": {},
         "id": 1
     });
 
     let response = client
         .post(url)
+        .header("x-api-key", &api_key)
         .json(&ping_req)
         .send()
         .await?;
@@ -42,14 +44,14 @@ async fn main() -> anyhow::Result<()> {
         "jsonrpc": "2.0",
         "method": "get_balance",
         "params": {
-            "address": "0xAlice",
-            "api_key": "dev-secret-key"
+            "address": "0xAlice"
         },
         "id": 2
     });
 
     let response = client
         .post(url)
+        .header("x-api-key", &api_key)
         .json(&balance_req)
         .send()
         .await?;
@@ -66,14 +68,14 @@ async fn main() -> anyhow::Result<()> {
         "params": {
             "from": "0xAlice",
             "to": "0xBob",
-            "amount": 1000,
-            "api_key": "dev-secret-key"
+            "amount": 1000
         },
         "id": 3
     });
 
     let response = client
         .post(url)
+        .header("x-api-key", &api_key)
         .json(&transfer_req)
         .send()
         .await?;
@@ -88,25 +90,26 @@ async fn main() -> anyhow::Result<()> {
         {
             "jsonrpc": "2.0",
             "method": "get_balance",
-            "params": {"address": "0xAlice", "api_key": "dev-secret-key"},
+            "params": {"address": "0xAlice"},
             "id": 4
         },
         {
             "jsonrpc": "2.0",
             "method": "get_balance",
-            "params": {"address": "0xBob", "api_key": "dev-secret-key"},
+            "params": {"address": "0xBob"},
             "id": 5
         },
         {
             "jsonrpc": "2.0",
             "method": "list_accounts",
-            "params": {"api_key": "dev-secret-key"},
+            "params": {},
             "id": 6
         }
     ]);
 
     let response = client
         .post(url)
+        .header("x-api-key", &api_key)
         .json(&batch_req)
         .send()
         .await?;

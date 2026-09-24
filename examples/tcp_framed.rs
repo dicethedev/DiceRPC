@@ -1,8 +1,7 @@
 /// TCP server with length-prefixed framing
-/// 
+///
 /// Run with:
 /// cargo run --example tcp_framed --features tcp
-
 use dice_rpc::*;
 use std::sync::Arc;
 
@@ -30,8 +29,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Configure TCP server
     let addr = "127.0.0.1:4000";
-    let config = transport::tcp::TcpServerConfig::new(addr, server)
-        .with_metrics(metrics.clone());
+    let config = transport::tcp::TcpServerConfig::new(addr, server).with_metrics(metrics.clone());
 
     println!("Server listening on {} (framed protocol)", addr);
     println!();

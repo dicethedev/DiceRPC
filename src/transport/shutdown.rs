@@ -7,40 +7,18 @@ pub struct ShutdownCoordinator {
     tx: broadcast::Sender<()>,
 }
 
-
 /// Example server with graceful shutdown
-/// 
+///
 /// ```rust
-/// use dice_rpc::shutdown::*;
-/// use std::time::Duration;
-/// 
-/// #[tokio::main]
-/// async fn main() -> anyhow::Result<()> {
-///     let coordinator = ShutdownCoordinator::new();
-///     let shutdown_rx = coordinator.subscribe();
-///     
-///     // Spawn signal handler
-///     tokio::spawn(async move {
-///         coordinator.wait_for_signal().await;
-///     });
-///     
-///     // Run server
-///     tokio::select! {
-///         result = run_server() => {
-///             result?;
-///         }
-///         _ = wait_for_shutdown(shutdown_rx) => {
-///             println!("Shutting down gracefully...");
-///         }
-///     }
-///     
-///     // Cleanup
-///     perform_cleanup().await;
-///     
-///     Ok(())
-/// }
+/// use dice_rpc::transport::shutdown::{ShutdownCoordinator, wait_for_shutdown};
+///
+/// # async fn example() {
+/// let coordinator = ShutdownCoordinator::new();
+/// let shutdown_rx = coordinator.subscribe();
+/// coordinator.shutdown();
+/// wait_for_shutdown(shutdown_rx).await;
+/// # }
 /// ```
-
 impl ShutdownCoordinator {
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(1);
@@ -61,12 +39,22 @@ impl ShutdownCoordinator {
     pub async fn wait_for_signal(&self) {
         #[cfg(unix)]
         {
-            use signal::unix::{signal, SignalKind};
-            
-            let mut sigterm = signal(SignalKind::terminate())
-                .expect("Failed to register SIGTERM handler");
-            let mut sigint = signal(SignalKind::interrupt())
-                .expect("Failed to register SIGINT handler");
+            use signal::unix::{SignalKind, signal};
+
+            let mut sigterm = match signal(SignalKind::terminate()) {
+                Ok(signal) => signal,
+                Err(error) => {
+                    warn!("Failed to register SIGTERM handler: {error}");
+                    return;
+                }
+            };
+            let mut sigint = match signal(SignalKind::interrupt()) {
+                Ok(signal) => signal,
+                Err(error) => {
+                    warn!("Failed to register SIGINT handler: {error}");
+                    return;
+                }
+            };
 
             tokio::select! {
                 _ = sigterm.recv() => {
@@ -80,9 +68,10 @@ impl ShutdownCoordinator {
 
         #[cfg(not(unix))]
         {
-            signal::ctrl_c()
-                .await
-                .expect("Failed to listen for CTRL+C");
+            if let Err(error) = signal::ctrl_c().await {
+                warn!("Failed to listen for CTRL+C: {error}");
+                return;
+            }
             info!("Received CTRL+C");
         }
 
@@ -112,9 +101,9 @@ pub async fn shutdown_with_timeout<F>(
 {
     // Wait for shutdown signal
     wait_for_shutdown(shutdown_rx).await;
-    
+
     info!("Running cleanup tasks...");
-    
+
     // Run cleanup with timeout
     match tokio::time::timeout(timeout, cleanup).await {
         Ok(_) => {
@@ -126,7 +115,6 @@ pub async fn shutdown_with_timeout<F>(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,10 +124,10 @@ mod tests {
     async fn test_shutdown_coordination() {
         let coordinator = ShutdownCoordinator::new();
         let mut rx = coordinator.subscribe();
-        
+
         // Trigger shutdown
         coordinator.shutdown();
-        
+
         // Should receive signal
         assert!(rx.try_recv().is_ok());
     }
@@ -149,9 +137,9 @@ mod tests {
         let coordinator = ShutdownCoordinator::new();
         let mut rx1 = coordinator.subscribe();
         let mut rx2 = coordinator.subscribe();
-        
+
         coordinator.shutdown();
-        
+
         assert!(rx1.try_recv().is_ok());
         assert!(rx2.try_recv().is_ok());
     }
@@ -160,12 +148,12 @@ mod tests {
     async fn test_shutdown_with_timeout() {
         let coordinator = ShutdownCoordinator::new();
         let rx = coordinator.subscribe();
-        
+
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(10)).await;
             coordinator.shutdown();
         });
-        
+
         shutdown_with_timeout(
             rx,
             async {

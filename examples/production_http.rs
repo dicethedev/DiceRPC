@@ -1,58 +1,80 @@
-
+use anyhow::{Context, bail};
 use dice_rpc::*;
 use std::sync::Arc;
+use std::time::Duration;
 
-
+/// Environment-configured HTTP server with authentication and resource limits.
+///
+/// Required:
+/// API_KEYS=key-one,key-two cargo run --example production_http
+///
+/// Optional: HTTP_ADDR, MAX_BODY_BYTES, MAX_BATCH_SIZE, MAX_CONCURRENCY,
+/// REQUEST_TIMEOUT_SECS.
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize logging
     server::metrics::init_logging();
 
-    // Create components
     let server = Arc::new(RpcServer::new());
     let state = Arc::new(state::StateStore::new());
-    let metrics = Arc::new(dice_rpc::Metrics::new());
+    let metrics = Arc::new(Metrics::new());
+    server::handlers::register_stateful_handlers(&server, state).await;
 
-    // Register handlers
-    dice_rpc::server::handlers::register_stateful_handlers(&server, state.clone()).await;
-
-    // Setup authentication
     let auth = Arc::new(middleware::AuthMiddleware::new(
-        middleware::AuthStrategy::ApiKeyInParams
+        middleware::AuthStrategy::ApiKeyInHeader,
     ));
-    
-    // Load API keys from environment
-    if let Ok(keys) = std::env::var("API_KEYS") {
-        for key in keys.split(',') {
-            auth.add_key(key.trim()).await;
-            tracing::info!("Loaded API key: {}...", &key[..8]);
-        }
-    } else {
-        // Default development keys
-        auth.add_key("dev-key-123").await;
+    let keys = std::env::var("API_KEYS")
+        .context("API_KEYS must contain a comma-separated list of secrets")?;
+    let mut key_count = 0usize;
+    for key in keys.split(',').map(str::trim).filter(|key| !key.is_empty()) {
+        key_count += usize::from(auth.add_key(key).await);
     }
+    if key_count == 0 {
+        bail!("API_KEYS must contain at least one non-empty key");
+    }
+    tracing::info!("Loaded {key_count} API key(s)");
 
-    // Spawn metrics reporter
-    let metrics_clone = metrics.clone();
+    let metrics_reporter = metrics.clone();
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-            let snapshot = metrics_clone.snapshot().await;
-            tracing::info!("Metrics: {:?}", snapshot);
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            tracing::info!("Metrics: {:?}", metrics_reporter.snapshot().await);
         }
     });
 
-    // Get configuration from environment
-    let addr = std::env::var("HTTP_ADDR")
-        .unwrap_or_else(|_| "0.0.0.0:3000".to_string());
+    let addr = std::env::var("HTTP_ADDR").unwrap_or_else(|_| "127.0.0.1:3000".to_string());
+    let max_body_size = env_usize("MAX_BODY_BYTES", 1024 * 1024)?;
+    let max_batch_size = env_usize("MAX_BATCH_SIZE", 100)?;
+    let max_concurrency = env_usize("MAX_CONCURRENCY", 256)?;
+    let timeout_secs = env_u64("REQUEST_TIMEOUT_SECS", 30)?;
 
     server::metrics::log_startup(&addr, "HTTP");
-
-    // Start HTTP server
     transport::HttpTransport::new(server)
         .with_auth(auth)
+        .with_metrics(metrics)
+        .with_max_body_size(max_body_size)
+        .with_max_batch_size(max_batch_size)
+        .with_max_concurrency(max_concurrency)
+        .with_request_timeout(Duration::from_secs(timeout_secs))
         .serve(&addr)
-        .await?;
+        .await
+}
 
-    Ok(())
+fn env_usize(name: &str, default: usize) -> anyhow::Result<usize> {
+    match std::env::var(name) {
+        Ok(value) => value
+            .parse::<usize>()
+            .with_context(|| format!("{name} must be a positive integer"))
+            .map(|value| value.max(1)),
+        Err(_) => Ok(default),
+    }
+}
+
+fn env_u64(name: &str, default: u64) -> anyhow::Result<u64> {
+    match std::env::var(name) {
+        Ok(value) => value
+            .parse::<u64>()
+            .with_context(|| format!("{name} must be a positive integer"))
+            .map(|value| value.max(1)),
+        Err(_) => Ok(default),
+    }
 }

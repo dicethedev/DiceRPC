@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RpcRequest {
     pub jsonrpc: String,
     pub method: String,
@@ -15,7 +15,19 @@ pub struct RpcRequest {
     pub id: Value, // id can be string or number or null
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+impl RpcRequest {
+    /// Return the request ID when it is valid for a JSON-RPC response.
+    /// Invalid ID types are represented as `null` in error responses.
+    pub fn response_id(&self) -> Value {
+        if is_valid_id(&self.id) {
+            self.id.clone()
+        } else {
+            Value::Null
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RpcErrorObj {
     pub code: i64,
     pub message: String,
@@ -23,17 +35,21 @@ pub struct RpcErrorObj {
     pub data: Option<Value>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RpcResponse {
     pub jsonrpc: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<RpcErrorObj>,
     pub id: Value,
 }
 
-pub const METHOD_NOT_FOUND: i64 = -32602;
+pub const PARSE_ERROR: i64 = -32700;
+pub const INVALID_REQUEST: i64 = -32600;
+pub const METHOD_NOT_FOUND: i64 = -32601;
 pub const INVALID_PARAMS: i64 = -32602;
+pub const INTERNAL_ERROR: i64 = -32603;
 
 /// Helper methods for constructing JSON-RPC 2.0 responses.
 ///
@@ -42,7 +58,6 @@ pub const INVALID_PARAMS: i64 = -32602;
 /// These helpers make it easy to create success or error responses
 /// in a consistent way.
 impl RpcResponse {
-
     /// Constructs a successful JSON-RPC response with the given `id` and `result`.
     ///
     /// # Arguments
@@ -51,7 +66,10 @@ impl RpcResponse {
     ///
     /// # Example
     /// ```rust
+    /// use dice_rpc::RpcResponse;
+    /// let request_id = serde_json::json!(1);
     /// let res = RpcResponse::with_result(request_id, serde_json::json!({"balance": 100}));
+    /// assert_eq!(res.result, Some(serde_json::json!({"balance": 100})));
     /// ```
     pub fn with_result(id: Value, res: Value) -> Self {
         RpcResponse {
@@ -71,18 +89,28 @@ impl RpcResponse {
     ///
     /// # Example
     /// ```rust
+    /// use dice_rpc::RpcResponse;
+    /// let request_id = serde_json::json!(1);
     /// let err = RpcResponse::with_error(request_id, -32601, "Method not found");
+    /// assert_eq!(err.error.unwrap().code, -32601);
     /// ```
-
     pub fn with_error(id: Value, code: i64, message: impl Into<String>) -> Self {
-        RpcResponse {
-            jsonrpc: "2.0".to_string(),
-            result: None,
-            error: Some(RpcErrorObj {
+        Self::with_error_obj(
+            id,
+            RpcErrorObj {
                 code,
                 message: message.into(),
                 data: None,
-            }),
+            },
+        )
+    }
+
+    /// Constructs an error response while preserving optional error data.
+    pub fn with_error_obj(id: Value, error: RpcErrorObj) -> Self {
+        RpcResponse {
+            jsonrpc: "2.0".to_string(),
+            result: None,
+            error: Some(error),
             id,
         }
     }
@@ -92,7 +120,6 @@ impl RpcResponse {
 pub type Handler = dyn Fn(Value) -> HandlerFuture + Send + Sync + 'static;
 pub type HandlerFuture =
     std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, RpcErrorObj>> + Send>>;
-
 
 /// Represents a lightweight asynchronous JSON-RPC server.
 ///
@@ -104,7 +131,6 @@ pub type HandlerFuture =
 /// # Fields
 /// - `handlers`: A thread-safe map from method names (`String`) to
 ///   their corresponding RPC handlers (`Arc<Handler>`).
-/// ```
 pub struct RpcServer {
     handlers: RwLock<HashMap<String, Arc<Handler>>>,
 }
@@ -129,9 +155,14 @@ pub struct RpcServer {
 /// - The handler is boxed and wrapped in an `Arc` for shared ownership and inserted into the internal map.
 /// - Example:
 ///   ```rust
+///   use dice_rpc::RpcServer;
+///   use serde_json::Value;
+///   # async fn example() {
+///   let server = RpcServer::new();
 ///   server.register("ping", |_params| async move {
 ///       Ok(Value::String("pong".into()))
 ///   }).await;
+///   # }
 ///   ```
 ///
 /// **`handle_request()`**
@@ -162,17 +193,33 @@ impl RpcServer {
     }
 
     pub async fn handle_request(&self, req: RpcRequest) -> RpcResponse {
-        let id = req.id.clone();
-        let handlers = self.handlers.read().await;
-        if let Some(h) = handlers.get(&req.method) {
-            // call handler
-            match (h)(req.params).await {
-                Ok(res) => RpcResponse::with_result(id, res),
-                Err(err) => RpcResponse::with_error(id, err.code, err.message),
+        let response_id = req.response_id();
+
+        if req.jsonrpc != "2.0" {
+            return RpcResponse::with_error(
+                response_id,
+                INVALID_REQUEST,
+                "Invalid Request: 'jsonrpc' must be exactly '2.0'",
+            );
+        }
+
+        if req.method.trim().is_empty() || !is_valid_id(&req.id) {
+            return RpcResponse::with_error(response_id, INVALID_REQUEST, "Invalid Request");
+        }
+
+        // Clone the handler while holding the registry lock, then release the
+        // lock before awaiting user code. This prevents a long-running method
+        // from blocking registration or other registry operations.
+        let handler = self.handlers.read().await.get(&req.method).cloned();
+
+        if let Some(handler) = handler {
+            match (handler)(req.params).await {
+                Ok(res) => RpcResponse::with_result(response_id, res),
+                Err(err) => RpcResponse::with_error_obj(response_id, err),
             }
         } else {
             RpcResponse::with_error(
-                id,
+                response_id,
                 METHOD_NOT_FOUND,
                 format!("Method not found: {}", req.method),
             )
@@ -180,6 +227,15 @@ impl RpcServer {
     }
 }
 
+impl Default for RpcServer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn is_valid_id(id: &Value) -> bool {
+    matches!(id, Value::Null | Value::String(_) | Value::Number(_))
+}
 
 // Helper function to parse raw JSON string into RpcRequest
 pub fn parse_rpc_request(raw: &str) -> Result<RpcRequest, serde_json::Error> {
@@ -210,41 +266,55 @@ pub fn parse_rpc_request(raw: &str) -> Result<RpcRequest, serde_json::Error> {
 ///   and safe registration of handlers prior to running the server.
 /// - These handlers serve as mock implementations useful for testing RPC integration
 ///   or demonstrating how to define async RPC endpoints.
-
 pub async fn register_default_handlers(server: &RpcServer) {
     // ping -> "pong"
-    server.register("ping", |_params| async move {
-        Ok(Value::String("pong".into()))
-    }).await;
+    server
+        .register(
+            "ping",
+            |_params| async move { Ok(Value::String("pong".into())) },
+        )
+        .await;
 
     // get_balance -> params { address: "0x..." } -> returns string of fake balance
-    server.register("get_balance", |params| async move {
-        // accept either object or array. We'll expect object with "address"
-        let address = if params.is_object() {
-            params.get("address").and_then(|v| v.as_str()).unwrap_or("")
-        } else {
-            ""
-        };
-        if address.is_empty() {
-            return Err(RpcErrorObj { code: INVALID_PARAMS, message: "Missing 'address' param".into(), data: None });
-        }
-        // fake balance: length-based deterministic value for demo
-        let bal = (address.len() * 12345) as u64;
-        Ok(Value::String(format!("{}", bal)))
-    }).await;
+    server
+        .register("get_balance", |params| async move {
+            // accept either object or array. We'll expect object with "address"
+            let address = if params.is_object() {
+                params.get("address").and_then(|v| v.as_str()).unwrap_or("")
+            } else {
+                ""
+            };
+            if address.is_empty() {
+                return Err(RpcErrorObj {
+                    code: INVALID_PARAMS,
+                    message: "Missing 'address' param".into(),
+                    data: None,
+                });
+            }
+            // fake balance: length-based deterministic value for demo
+            let bal = (address.len() * 12345) as u64;
+            Ok(Value::String(format!("{}", bal)))
+        })
+        .await;
 
     // send_tx -> params { raw_tx: "0x..." } -> returns txid
-    server.register("send_tx", |params| async move {
-        let raw = if params.is_object() {
-            params.get("raw_tx").and_then(|v| v.as_str()).unwrap_or("")
-        } else {
-            ""
-        };
-        if raw.is_empty() {
-            return Err(RpcErrorObj { code: INVALID_PARAMS, message: "Missing 'raw_tx' param".into(), data: None });
-        }
-        // "send" generates a uuid txid
-        let txid = Uuid::new_v4().to_string();
-        Ok(Value::String(txid))
-    }).await;
+    server
+        .register("send_tx", |params| async move {
+            let raw = if params.is_object() {
+                params.get("raw_tx").and_then(|v| v.as_str()).unwrap_or("")
+            } else {
+                ""
+            };
+            if raw.is_empty() {
+                return Err(RpcErrorObj {
+                    code: INVALID_PARAMS,
+                    message: "Missing 'raw_tx' param".into(),
+                    data: None,
+                });
+            }
+            // "send" generates a uuid txid
+            let txid = Uuid::new_v4().to_string();
+            Ok(Value::String(txid))
+        })
+        .await;
 }
