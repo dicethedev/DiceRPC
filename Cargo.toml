@@ -37,10 +37,12 @@ reqwest = { version = "0.13.5", features = ["json"] }
 
 [dev-dependencies]
 tokio-test = "0.4.5"
+tokio-tungstenite = "0.30.0"
 
 
 [features]
 default = ["tcp", "http"]
 tcp = []
 http = ["dep:axum", "dep:tower", "dep:tower-http"]
-full = ["tcp", "http"]
+websocket = ["http", "axum/ws"]
+full = ["tcp", "http", "websocket"]

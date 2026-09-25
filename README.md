@@ -2,7 +2,7 @@
 
 An approachable, asynchronous RPC toolkit for Rust, built around JSON-RPC 2.0-style messages.
 
-DiceRPC gives you a small handler registry, HTTP and TCP transports, batch requests, shared state, metrics, and examples you can build on. The project is under active development and welcomes contributors of every experience level.
+DiceRPC gives you a small handler registry, HTTP, TCP, and WebSocket transports, batch requests, shared state, metrics, and examples you can build on. The project is under active development and welcomes contributors of every experience level.
 
 > **Project status:** DiceRPC is currently `0.1.0` and is best suited to learning, prototypes, and internal experimentation. Its API may change as protocol compliance and production hardening improve. Read [Security](#security) before exposing a server to untrusted networks.
 
@@ -10,6 +10,7 @@ DiceRPC gives you a small handler registry, HTTP and TCP transports, batch reque
 
 - JSON-RPC services with custom asynchronous methods
 - HTTP APIs with Axum
+- Persistent request/response sessions over WebSocket
 - Newline-delimited or length-prefixed TCP services
 - Stateful services backed by the included in-memory store
 - Batch request handlers
@@ -22,7 +23,7 @@ DiceRPC is useful when you need a small, customizable RPC layer rather than a fu
 - **Internal service APIs** — expose typed business operations to trusted services over HTTP or TCP.
 - **Blockchain tooling and simulators** — prototype node-style methods, transaction flows, wallets, and test harnesses.
 - **Developer tools** — control local processes, emulators, indexers, or background workers through a simple RPC interface.
-- **Protocol experiments** — compare HTTP, newline-delimited TCP, and framed TCP behavior around the same method registry.
+- **Protocol experiments** — compare HTTP, WebSocket, newline-delimited TCP, and framed TCP behavior around the same method registry.
 - **Teaching and testing** — demonstrate async handlers, middleware, shared state, batch calls, metrics, and graceful shutdown.
 
 DiceRPC is not yet intended to replace a hardened public API gateway. Put internet-facing deployments behind TLS, authentication, authorization, and edge-level abuse controls.
@@ -31,6 +32,7 @@ DiceRPC is not yet intended to replace a hardened public API gateway. Put intern
 
 - Async method registration and concurrent execution with Tokio
 - HTTP endpoints at `/` and `/rpc`
+- WebSocket endpoint at `/ws` for persistent JSON-RPC sessions
 - TCP transport with legacy newline-delimited and length-prefixed modes
 - Single and batch request processing
 - API-key middleware for HTTP headers, request parameters, and framed TCP requests
@@ -110,6 +112,22 @@ The CLI HTTP server includes stateful demonstration methods and exposes:
 
 Run `cargo run -- --help` to see all CLI commands and options.
 
+### Try the WebSocket server
+
+WebSocket support is optional. Start the CLI server with the feature enabled:
+
+```bash
+cargo run --features websocket -- websocket-server
+```
+
+Connect to `ws://127.0.0.1:3001/ws` with a WebSocket client and send one JSON-RPC request per text message:
+
+```json
+{"jsonrpc":"2.0","method":"ping","params":{},"id":1}
+```
+
+The connection stays open for more single or batch requests. Text messages and UTF-8 binary messages are accepted; responses are sent as text messages.
+
 ## Register your own method
 
 Create an `RpcServer`, register an async handler, and attach a transport:
@@ -182,7 +200,7 @@ An unsuccessful response contains an error object instead. DiceRPC follows the m
 
 ## Batch requests
 
-The HTTP and framed TCP paths accept multiple requests in one JSON array:
+The HTTP, WebSocket, and framed TCP paths accept multiple requests in one JSON array:
 
 ```bash
 curl --request POST http://127.0.0.1:3000/rpc \
@@ -202,6 +220,7 @@ Network-facing transports have conservative defaults and builder methods for tun
 | Transport | Default limits | Builder methods |
 | --- | --- | --- |
 | HTTP | 1 MiB body, 100 batch entries, 256 concurrent requests, 30-second timeout | `with_max_body_size`, `with_max_batch_size`, `with_max_concurrency`, `with_request_timeout` |
+| WebSocket | 1 MiB message, 100 batch entries, 1,024 connections, 30-second timeout per message | `with_max_message_size`, `with_max_batch_size`, `with_max_connections`, `with_request_timeout` |
 | Framed TCP | 1 MiB frame, 100 batch entries, 1,024 connections, 30-second timeout | `with_max_frame_size`, `with_max_batch_size`, `with_max_connections`, `with_request_timeout` |
 
 These are application-level safeguards, not a replacement for proxy, firewall, and operating-system limits.
@@ -220,7 +239,7 @@ curl --request POST http://127.0.0.1:3000/rpc \
   --data '{"jsonrpc":"2.0","method":"ping","params":{},"id":1}'
 ```
 
-Framed TCP uses `ApiKeyInParams`, so each request includes `"api_key"` in its `params` object. `ApiKeyInHeader` is available only to HTTP because TCP requests do not contain HTTP headers.
+WebSocket supports `ApiKeyInHeader` during the HTTP upgrade handshake, which authenticates the connection before it opens. It also supports `ApiKeyInParams` for authenticating each message. Framed TCP uses `ApiKeyInParams`, so each request includes `"api_key"` in its `params` object.
 
 API keys are compared in constant time. Authentication does not provide per-method authorization, TLS, identity roles, or key storage; applications must add those controls for their environment.
 
@@ -241,7 +260,8 @@ These methods contain demonstration logic, not a blockchain implementation. In p
 | --- | --- | --- |
 | `tcp` | Yes | TCP transport and framing |
 | `http` | Yes | Axum HTTP transport and endpoints |
-| `full` | No | Explicitly enables both transports |
+| `websocket` | No | WebSocket transport at `/ws`; also enables `http` |
+| `full` | No | Explicitly enables all transports |
 
 Useful build commands:
 
@@ -254,6 +274,9 @@ cargo build --no-default-features --features tcp
 
 # HTTP only
 cargo build --no-default-features --features http
+
+# WebSocket (and its HTTP foundation)
+cargo build --no-default-features --features websocket
 
 # All supported transports
 cargo build --features full
@@ -274,6 +297,7 @@ The [`examples`](examples) directory is the fastest way to explore individual fe
 | `http_with_state` | Shared application state over HTTP |
 | `http_full_featured` | HTTP features used together |
 | `production_http` | Environment-driven auth and resource limits |
+| `websocket_server` | Persistent single and batch requests over WebSocket |
 | `tcp_basic` | Minimal TCP server |
 | `tcp_framed` | Length-prefixed TCP messages |
 | `tcp_with_auth` | Parameter-based authentication over framed TCP |
@@ -285,6 +309,9 @@ Run one with:
 
 ```bash
 cargo run --example http_basic
+
+# WebSocket is an optional feature
+cargo run --example websocket_server --features websocket
 ```
 
 Some examples start a server and keep running until you stop them with `Ctrl+C`.
@@ -299,7 +326,7 @@ src/
 ├── middleware/   # Authentication middleware
 ├── rpc/          # Request, response, and handler registry
 ├── server/       # Server helpers, stateful handlers, and metrics
-├── transport/    # HTTP, TCP, framing, metrics endpoints, and shutdown
+├── transport/    # HTTP, WebSocket, TCP, framing, metrics, and shutdown
 ├── util/         # Batch request handling
 ├── lib.rs        # Public library exports
 ├── main.rs       # CLI entry point
@@ -343,7 +370,7 @@ The roadmap is intentionally flexible while the core API matures:
 - [ ] Add per-method authorization hooks
 - [ ] Add TLS and reverse-proxy deployment documentation
 - [ ] Add persistent state adapters
-- [ ] Add WebSocket transport
+- [x] Add WebSocket transport
 - [ ] Add Prometheus-compatible metrics
 - [ ] Add fuzzing, benchmarks, and load tests
 - [ ] Publish versioned API documentation and migration notes

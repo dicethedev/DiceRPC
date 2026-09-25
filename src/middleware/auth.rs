@@ -15,7 +15,7 @@ pub enum AuthStrategy {
     None,
     /// API key in params: { "api_key": "..." }
     ApiKeyInParams,
-    /// API key in custom header (for HTTP transport)
+    /// API key in the `x-api-key` header (for HTTP and WebSocket transports)
     ApiKeyInHeader,
 }
 
@@ -97,7 +97,7 @@ impl AuthMiddleware {
             AuthStrategy::ApiKeyInParams => self.validate_params_key(req).await,
             AuthStrategy::ApiKeyInHeader => Err(RpcErrorObj {
                 code: AUTH_REQUIRED,
-                message: "Header authentication requires the HTTP transport".to_string(),
+                message: "Header authentication requires an HTTP-based transport".to_string(),
                 data: None,
             }),
         }

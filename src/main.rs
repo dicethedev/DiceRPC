@@ -6,7 +6,7 @@ use std::time::Duration;
 
 #[derive(Parser, Debug)]
 #[command(name = "DiceRPC")]
-#[command(about = "JSON-RPC 2.0 server with TCP and HTTP support")]
+#[command(about = "JSON-RPC 2.0 server with TCP, HTTP, and WebSocket support")]
 struct Opts {
     #[command(subcommand)]
     cmd: Mode,
@@ -43,6 +43,17 @@ enum Mode {
         auth: bool,
     },
 
+    /// Run the WebSocket RPC server
+    #[cfg(feature = "websocket")]
+    WebSocketServer {
+        #[arg(short, long, default_value = "127.0.0.1:3001")]
+        addr: String,
+
+        /// Require an `x-api-key` header during the WebSocket handshake
+        #[arg(long)]
+        auth: bool,
+    },
+
     /// Run a one-shot client request
     Client {
         #[command(flatten)]
@@ -73,10 +84,44 @@ async fn main() -> anyhow::Result<()> {
             run_http_server(&addr, auth).await?;
         }
 
+        #[cfg(feature = "websocket")]
+        Mode::WebSocketServer { addr, auth } => {
+            run_websocket_server(&addr, auth).await?;
+        }
+
         Mode::Client { client } => {
             client::run_client(client).await?;
         }
     }
+    Ok(())
+}
+
+#[cfg(feature = "websocket")]
+async fn run_websocket_server(addr: &str, enable_auth: bool) -> anyhow::Result<()> {
+    use middleware::AuthStrategy;
+    use state::StateStore;
+    use transport::WebSocketTransport;
+
+    let server = Arc::new(RpcServer::new());
+    let state = Arc::new(StateStore::new());
+    let metrics = Arc::new(server::metrics::Metrics::new());
+
+    state.set_balance("0xAlice", 100000).await;
+    state.set_balance("0xBob", 50000).await;
+    state.set_balance("0xCharlie", 75000).await;
+    server::handlers::register_stateful_handlers(&server, state).await;
+
+    let mut websocket = WebSocketTransport::new(server).with_metrics(metrics);
+    if enable_auth {
+        let auth = load_auth_from_env(AuthStrategy::ApiKeyInHeader).await?;
+        println!("Authentication enabled with x-api-key and keys loaded from API_KEYS");
+        websocket = websocket.with_auth(auth);
+    }
+
+    server::metrics::log_startup(addr, "WebSocket");
+    println!("Endpoint: ws://{addr}/ws");
+    websocket.serve(addr).await?;
+    server::metrics::log_shutdown();
     Ok(())
 }
 

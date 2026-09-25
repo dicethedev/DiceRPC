@@ -8,6 +8,9 @@ pub mod http_transport;
 #[cfg(feature = "tcp")]
 pub mod tcp;
 
+#[cfg(feature = "websocket")]
+pub mod websocket;
+
 pub use framing::FrameCodec;
 pub use shutdown::ShutdownCoordinator;
 
@@ -16,3 +19,6 @@ pub use http_transport::HttpTransport;
 
 #[cfg(feature = "tcp")]
 pub use tcp::{TcpServerConfig, run_with_framing};
+
+#[cfg(feature = "websocket")]
+pub use websocket::WebSocketTransport;

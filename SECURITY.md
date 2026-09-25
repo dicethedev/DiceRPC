@@ -50,9 +50,10 @@ Good-faith research that follows these guidelines is appreciated. This policy do
 
 The following limitations are already known. Reports are still useful when they demonstrate a new bypass, a greater impact, or a practical fix.
 
-- The built-in transports do not provide TLS; example HTTP and TCP traffic is plaintext.
+- The built-in transports do not provide TLS; example HTTP, WebSocket, and TCP traffic is plaintext.
 - `ApiKeyInParams` places credentials in the JSON body, where logs and tracing systems may capture them.
-- HTTP header authentication uses `x-api-key`, but DiceRPC does not provide per-method authorization or identity roles.
+- HTTP and WebSocket handshake authentication use `x-api-key`, but DiceRPC does not provide per-method authorization or identity roles.
+- The WebSocket transport does not enforce an `Origin` allowlist; browser-facing deployments must validate `Origin` at a trusted proxy or gateway.
 - Default resource limits are provided, but operators must tune them for their workload and also enforce infrastructure-level limits.
 - The legacy newline-delimited TCP server does not provide the authentication, metrics, batch, timeout, or connection controls of the framed transport.
 - The included state store is demonstration code: it is in memory and does not provide durable or distributed consistency.
@@ -64,10 +65,11 @@ Until the built-in security controls are hardened:
 
 - bind to `127.0.0.1` unless remote access is required;
 - place DiceRPC behind a trusted TLS reverse proxy or API gateway;
-- prefer `x-api-key` header authentication for HTTP and enforce per-method authorization at a gateway or in handlers;
+- prefer `x-api-key` header authentication for HTTP and WebSocket handshakes, and enforce per-method authorization at a gateway or in handlers;
+- expose WebSocket deployments as `wss://` through a trusted TLS proxy and enforce an `Origin` allowlist for browser clients;
 - generate strong credentials, store them outside source control, rotate them, and redact them from logs;
 - validate and bound every method parameter;
-- tune DiceRPC's request-body, frame, batch, connection, concurrency, and timeout limits and reinforce them at the edge;
+- tune DiceRPC's request-body, WebSocket message, frame, batch, connection, concurrency, and timeout limits and reinforce them at the edge;
 - restrict `/metrics` and other operational endpoints;
 - run the process with minimal operating-system and network privileges;
 - pin and audit dependencies; and
